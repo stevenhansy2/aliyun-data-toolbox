@@ -1,0 +1,26 @@
+# AIStudio 数据质量检测任务列表示例
+# 
+# 格式说明：
+# config_file oss_path
+# 
+# - config_file: 配置文件名（不含 .yaml 后缀），对应 config/ 目录下的配置文件
+# - oss_path: OSS 数据路径，相对于 OSS_DATA_PREFIX 的路径
+#
+# 示例：
+# custom_bjrenxing_agilex_splitAloha buy_customized/bj_renxing/20251119/data02/anti_lerobot_1030_1/agilex_splitAloha_dualArm-gripper-3cameras_1/task_name
+#
+# 说明：
+# 1. 以 # 开头的行为注释，会被忽略
+# 2. 空行会被忽略
+# 3. 每行必须包含两个部分，用空格分隔
+# 4. 同一个配置文件可以对应多个数据集路径
+
+# 示例任务 1: 使用 custom_bjrenxing_agilex_splitAloha 配置检测数据集
+custom_bjrenxing_agilex_splitAloha buy_customized/bj_renxing/20251119/data02/anti_lerobot_1030_1/agilex_splitAloha_dualArm-gripper-3cameras_1/add_light_soy_sauce_and_a_few_drops_of_sesame_oil_to_fried_rice
+
+# 示例任务 2: 使用 custom_bjrenxing_tienkung_station 配置检测数据集
+custom_bjrenxing_tienkung_station buy_customized/bj_renxing/20251119/data02/anti_lerobot_1030_1/tienkung_station_dualArm-gripper-3cameras_13/add_chicken_bouillon_and_white_pepper_to_soup
+
+# 示例任务 3: 使用 robby_franka 配置检测数据集
+robby_franka buy/task_001/episode_001
+

@@ -1,0 +1,5 @@
+# OSS 配置示例
+# 请根据实际情况填写您的 OSS 配置信息
+oss_domain: your-oss-domain.aliyuncs.com
+oss_key_id: YOUR_OSS_KEY_ID
+oss_key_secret: YOUR_OSS_KEY_SECRET

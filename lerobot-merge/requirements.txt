@@ -1,0 +1,2 @@
+jsonlines~=4.0.0
+numpy~=2.2.6

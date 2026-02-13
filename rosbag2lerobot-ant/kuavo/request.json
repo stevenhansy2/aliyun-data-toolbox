@@ -1,0 +1,60 @@
+{
+  "output_dir": "/tmp/ks_download/6",
+  "upload_dir": "kuavo-test/datahub/test/",
+  "id": "v0",
+  "topics": [
+    "/kuavo_arm_traj",
+    "/sensors_data_raw",
+    "/joint_cmd",
+    "/control_robot_hand_position",
+    "/control_robot_hand_position_state",
+    "/leju_claw_command",
+    "/leju_claw_state",
+    "/cb_left_hand_state",
+    "/cb_right_hand_state",
+    "/cb_left_hand_control_cmd",
+    "/cb_right_hand_control_cmd",
+    "/force6d_left_hand_force_torque",
+    "/force6d_right_hand_force_torque",
+    "/cb_left_hand_matrix_touch_pc2",
+    "/cb_right_hand_matrix_touch_pc2",
+    "/cam_h/color/image_raw/compressed",
+    "/cam_r/color/image_raw/compressed",
+    "/cam_l/color/image_raw/compressed",
+    "/cam_h/depth/image_raw/compressedDepth",
+    "/cam_l/depth/image_rect_raw/compressedDepth",
+    "/cam_r/depth/image_rect_raw/compressedDepth",
+    "/cam_h/depth/image_raw/compressed",
+    "/cam_l/depth/image_rect_raw/compressed",
+    "/cam_r/depth/image_rect_raw/compressed",
+    "/cam_h/color/metadata",
+    "/cam_l/color/metadata",
+    "/cam_r/color/metadata",
+    "/cam_h/color/camera_info",
+    "/cam_h/color/camera_info/",
+    "/cam_l/color/camera_info",
+    "/cam_r/color/camera_info"
+  ],
+  "train_frequency":30,
+  "main_timeline":{
+    "topic": "/cam_h/color/image_raw/compressed",
+    "frequency": 30
+  },
+  "only_arm": false,
+  "eef_type": "dex_hand",
+  "which_arm": "both",
+  "dex_dof_needed": 1,
+  "img_resize":{
+    "width": 848,
+    "height": 480
+  },
+  "bags": [
+    { "link": "kuavo-test/datahub/test/Task24_grab_new_20250517_213901_0.bag", "start": 0, "end": 1 }
+  ],
+  "is_binary": false,
+  "is_delta_action": false,
+  "is_relative_start": false,
+  "separate_hand_fields": false,
+  "merge_hand_position": false
+
+}

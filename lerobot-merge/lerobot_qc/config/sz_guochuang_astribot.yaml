@@ -1,0 +1,137 @@
+# LeRobot 数据集质量检测配置文件
+
+# A1: 数据结构规定
+expected_features:
+  # 相机图像 - 所有相机键统一放置在 observation.images.* 命名空间
+  observation.images.camera_top:
+    dtype: "video"
+    description: "顶部相机"
+  observation.images.camera_wrist_left:
+    dtype: "video"
+    description: "左腕部相机"
+  observation.images.camera_wrist_right:
+    dtype: "video"
+    description: "右腕部相机"
+
+  # 状态观测 - observation.state.*
+  observation.state.arm.position:
+    dtype: "float32"
+    dim: 14
+    description: "机器人臂部关节位置，双臂(7+7)，单臂仅使用前7维"
+  observation.state.arm.velocity:
+    dtype: "float32"
+    dim: 14
+    description: "机器人臂部关节速度"
+
+  observation.state.effector.position:
+    dtype: "float32"
+    dim: 2
+    description: "简易夹爪(1+1)"
+  observation.state.effector.velocity:
+    dtype: "float32"
+    dim: 2
+
+  observation.state.end.pose:
+    dtype: "float32"
+    dim: 14
+    description: "两末端6D位姿(2×7)四元数"
+
+  observation.state.waist.position:
+    dtype: "float32"
+    dim: 4
+    description: "腰部关节（预留），躯干4DOF，实现上下/俯仰/旋转"
+  observation.state.waist.velocity:
+    dtype: "float32"
+    dim: 4
+
+
+  # 动作 - action.* (命名同 state 一致，只需要将state换为action)
+  action.arm.position:
+    dtype: "float32"
+    dim: 14
+
+  action.effector.position:
+    dtype: "float32"
+    dim: 2
+
+  action.end.pose:
+    dtype: "float32"
+    dim: 14
+
+  action.waist.position:
+    dtype: "float32"
+    dim: 4
+
+
+# A2: 统计信息检查 - 允许为0的字段白名单（可选）
+# 如果某些字段预期就是全0，可以添加到这里避免误报
+allow_zero_fields: ["observation.state.waist.position", "observation.state.waist.velocity", "action.waist.position"]
+
+# B1: 异常静止检测参数
+static_detection:
+  window_sec: 3.0                    # 窗口长度（秒）
+  step_sec: 1.0                      # 滑动步长（秒）
+  angle_range_threshold: 0.01        # 角度范围阈值（弧度）
+  max_static_ratio: 0.30             # 最大静止帧占比（1%）
+  # arm 关节列表 - 根据实际机器人配置修改
+  arm_joint_keys:
+    - "action.arm.position"
+    - "observation.state.arm.position"
+
+# B2: 角度域与 Gripper 检查
+angle_gripper_check:
+  # Gripper 字段列表
+  gripper_keys:
+    - "action.effector.position"
+    - "observation.state.effector.position"
+  gripper_min: 0.0
+  gripper_max: 100.0
+
+  # 角度字段列表（需要检测角度域）
+  angle_keys:
+    - "action.arm.position"
+    - "observation.state.arm.position"
+    - "action.waist.position"
+    - "observation.state.waist.position"
+
+# B3: 原始信号异常检测参数
+anomaly_detection:
+  fps: 30                            # 采样频率
+
+  # 离群值检测 - MAD (Median Absolute Deviation) 倍数
+  angle_mad_k: 3.0
+  vel_mad_k: 3.0
+  acc_mad_k: 3.0
+
+  # 突变/尖峰检测
+  dtheta_thr: 0.5                    # 一阶差分阈值（弧度）
+  d2theta_thr: 0.3                   # 二阶差分阈值（弧度/帧²）
+  min_consecutive: 3                 # 最小连续帧数
+
+  # 抖动/不顺滑检测
+  tv_per_sec_thr: 10.0               # 单位时间总变差阈值（弧度/秒）
+
+  # 报告参数
+  top_k: 10                          # 报告 Top-K 异常片段
+
+  # 物理限制（可选）- 如果不提供则仅报告分位数
+  motor_limits:
+    # 示例配置，根据实际机器人参数修改
+    # "action.arm.position":
+    #   angle_min: -3.14159
+    #   angle_max: 3.14159
+    #   velocity_max: 3.0
+    #   acceleration_max: 10.0
+
+# 全局设置
+global:
+  # 是否对角度进行 unwrap 处理
+  unwrap_angles: true
+
+  # 报告格式
+  output_formats:
+    - "json"
+    - "markdown"
+
+  # 日志级别
+  log_level: "INFO"

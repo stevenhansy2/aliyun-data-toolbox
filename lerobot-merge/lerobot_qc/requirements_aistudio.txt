@@ -1,0 +1,6 @@
+aii-pypai
+aistudio-common
+easydict
+six
+python-dateutil
+oss2

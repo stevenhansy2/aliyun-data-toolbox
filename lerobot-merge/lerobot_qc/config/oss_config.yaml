@@ -1,0 +1,12 @@
+# oss配置文件
+oss:
+  endpoint: "cn-shanghai-ant-internal.oss-alipay.aliyuncs.com"
+  bucket: "antsys-robby-shanghai-data-prod"
+  access_key_id: ""
+  access_key_secret: ""
+  prefix: "" # 单个oss任务使用
+  parent_prefix: ""  # 遍历oss任务使用
+
+  num_workers: 8  # 新增并发数参数
+
+
