@@ -29,8 +29,8 @@ def parallel_rosbag_worker(args: dict, result_queue, worker_id: int):
 
     import rosbag
     import rospy
-    from converter.config import ResizeConfig
-    from converter.reader.kuavo_dataset_slave_s import (
+    from converter.configs import ResizeConfig
+    from converter.reader.reader_entry import (
         KuavoRosbagReader,
         StreamingAlignmentState,
     )

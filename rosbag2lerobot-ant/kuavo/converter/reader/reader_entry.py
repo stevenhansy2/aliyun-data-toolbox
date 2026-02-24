@@ -1,7 +1,7 @@
 """Compatibility exports for Kuavo ROSbag reader.
 
 This module intentionally stays thin and re-exports the implementation from
-`kuavo_dataset_reader_impl.py` to keep this file small and stable for imports.
+`rosbag_reader.py` to keep this file small and stable for imports.
 """
 
 from converter.configs.joint_names import (
@@ -13,7 +13,7 @@ from converter.configs.joint_names import (
     DEFAULT_LEG_JOINT_NAMES,
     DEFAULT_LEJUCLAW_JOINT_NAMES,
 )
-from converter.reader.kuavo_dataset_reader_impl import (
+from converter.reader.rosbag_reader import (
     TimestampStuckError,
     StreamingAlignmentState,
     KuavoRosbagReader,

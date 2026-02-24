@@ -8,10 +8,13 @@ from pathlib import Path
 import numpy as np
 import psutil
 
-from converter.config import Config
-from converter.reader.kuavo_dataset_slave_s import KuavoRosbagReader
+from converter.configs import Config
+from converter.media.camera_flip import (
+    flip_camera_arrays_if_needed,
+    swap_left_right_data_if_needed,
+)
+from converter.reader.reader_entry import KuavoRosbagReader
 from converter.reader.postprocess_utils import PostProcessorUtils
-from converter.slave_utils import flip_camera_arrays_if_needed, swap_left_right_data_if_needed
 
 def load_raw_depth_images_per_camera(bag_data: dict, default_camera_names: list[str]):
     imgs_per_cam = {}

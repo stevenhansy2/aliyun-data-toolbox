@@ -10,7 +10,7 @@ import os
 import glob
 from collections import defaultdict
 import time
-from converter.config import Config, load_config_from_json
+from converter.configs import Config, load_config_from_json
 from converter.configs.joint_names import (
     DEFAULT_ARM_JOINT_NAMES,
     DEFAULT_DEXHAND_JOINT_NAMES,

@@ -10,7 +10,7 @@ from typing import Literal
 from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-from converter.config import Config
+from converter.configs import Config
 
 
 @dataclasses.dataclass(frozen=True)

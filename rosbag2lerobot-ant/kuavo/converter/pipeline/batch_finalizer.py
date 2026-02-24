@@ -7,15 +7,17 @@ import json
 import os
 import time
 
-from converter.data_utils import merge_metadata_and_moment
-from converter.slave_utils import (
-    move_and_rename_depth_videos,
+from converter.data.metadata_merge import merge_metadata_and_moment
+from converter.media.camera_flip import move_and_rename_depth_videos
+from converter.media.camera_params import (
     save_camera_extrinsic_params,
     save_camera_info_to_json_new,
+)
+from converter.media.depth_video_export import (
     save_depth_videos_16U_parallel,
     save_depth_videos_enhanced_parallel,
 )
-from converter.video_pipeline import save_image_bytes_to_temp
+from converter.media.video_orchestrator import save_image_bytes_to_temp
 
 
 def persist_batch_media(

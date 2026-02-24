@@ -3,7 +3,7 @@
 import multiprocessing
 import os
 
-from converter.config import Config
+from converter.configs import Config
 from converter.media.video_workers import _encode_color_camera_worker, _encode_depth_camera_worker
 
 def encode_complete_videos_from_temp(

@@ -9,7 +9,7 @@ import time
 import cv2
 import einops
 import numpy as np
-from converter.config import Config
+from converter.configs import Config
 from converter.media.video_workers import (
     _encode_color_camera_worker as _encode_color_camera_worker_impl,
     _encode_depth_camera_worker as _encode_depth_camera_worker_impl,

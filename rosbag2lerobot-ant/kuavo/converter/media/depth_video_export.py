@@ -8,7 +8,7 @@ import tempfile
 
 import cv2
 import numpy as np
-from converter.config import Config
+from converter.configs import Config
 from converter.image.depth_conversion import process_depth_image_optimized
 
 def save_one_color_video_ffmpeg(cam_name, imgs, output_dir, raw_config):

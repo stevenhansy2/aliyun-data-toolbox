@@ -7,21 +7,19 @@ import os
 import time
 
 import numpy as np
-from converter.config import Config
+from converter.configs import Config
 from converter.pipeline.dataset_builder import create_empty_dataset
 from converter.pipeline.frame_builder import write_batch_frames
-from converter.pipeline.stream_finalize import (
+from converter.pipeline.batch_finalizer import (
     persist_batch_media,
     save_batch_metadata_json,
     save_first_batch_parameters,
 )
-from converter.reader.kuavo_dataset_slave_s import KuavoRosbagReader
+from converter.reader.reader_entry import KuavoRosbagReader
 from converter.reader.postprocess_utils import PostProcessorUtils
-from converter.data_utils import (
-    _split_dexhand_lr,
-    get_bag_time_info,
-    get_time_range_from_moments,
-)
+from converter.data.bag_discovery import get_bag_time_info
+from converter.data.episode_loader import _split_dexhand_lr
+from converter.data.metadata_merge import get_time_range_from_moments
 
 logger = logging.getLogger(__name__)
 

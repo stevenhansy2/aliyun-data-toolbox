@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 
-from converter.data_utils import get_nested_value
+from converter.data.common_utils import get_nested_value
 
 
 def _build_output_state_action(
@@ -305,4 +305,3 @@ def write_batch_frames(
             if dataset.image_writer.queue.qsize() > 500:
                 dataset._wait_image_writer()
                 gc.collect()
-

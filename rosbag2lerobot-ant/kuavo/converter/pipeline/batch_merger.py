@@ -8,7 +8,7 @@ import shutil
 import argparse
 import logging
 from pathlib import Path
-from converter.episode_stats_aggregator import aggregate_episode_stats
+from converter.pipeline.episode_stats_aggregator import aggregate_episode_stats
 try:
     import pyarrow.parquet as pq
     import pyarrow as pa

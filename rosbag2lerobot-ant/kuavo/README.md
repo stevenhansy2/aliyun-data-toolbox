@@ -11,7 +11,7 @@
 - Shell 入口：`kuavo/run.sh`
 
 核心编排函数：
-- `converter/port_pipeline.py:port_kuavo_rosbag`
+- `converter.pipeline.conversion_orchestrator.py:port_kuavo_rosbag`
 
 ## 2. 端到端流程
 
@@ -20,7 +20,7 @@ master_generate_lerobot_s.py
   -> 读取配置 + 扫描 bag 任务
   -> 对每个 bag 调用 port_kuavo_rosbag
 
-port_pipeline.py
+conversion_orchestrator.py
   -> 探测手型/配置上下文
   -> stream_population.populate_dataset_stream
       -> KuavoRosbagReader 流式(或并行)读 bag
@@ -30,6 +30,72 @@ port_pipeline.py
   -> video_pipeline 完成视频编码
   -> 输出最终 LeRobot 目录
 ```
+
+### 2.1 当前数转整体流程
+
+1. 启动入口与配置加载  
+文件：`kuavo/master_generate_lerobot_s.py`  
+动作：
+- 读取 CLI 参数（`--bag_dir`、`--output_dir`、`--config`、`--use_depth` 等）。
+- 加载配置对象（`converter/configs/runtime_config.py`）。
+- 应用覆盖字段（如 `train_hz`、`which_arm`、`only_arm`）。
+
+2. 自动发现 bag 任务  
+文件：`converter/data/bag_discovery.py`  
+动作：
+- 扫描输入目录中的 `.bag`（支持单 bag、同级多个 bag、子目录一层扫描）。
+- 解析 sidecar：`metadata.json` / `moments.json`。
+- 形成每个 bag 的任务项（包含 `dataset_name`、时间窗、sidecar 路径）。
+
+3. 进入总编排  
+文件：`converter/pipeline/conversion_orchestrator.py`，函数 `port_kuavo_rosbag`  
+动作：
+- 根据首个 bag 探测手型数据可用性（leju claw / dex hand）。
+- 组装本次转换上下文（切片策略、关节名、视频策略、并行参数）。
+- 调用 batch 主循环处理函数。
+
+4. 流式/并行读包与对齐  
+文件：`converter/pipeline/batch_processor.py`  
+依赖：
+- 读取器入口：`converter/reader/reader_entry.py`
+- 读取器实现：`converter/reader/rosbag_reader.py`
+- 流式处理核心：`converter/reader/streaming_pipeline.py`
+- 对齐核心：`converter/reader/alignment_engine.py`
+动作：
+- 按 batch 从 rosbag 读取主时间线及各模态消息。
+- 进行时间戳去重、插值、误差评估和按需修正。
+- 产出 `aligned_batch`（每个 key 对齐到同一主时间线帧序）。
+
+5. 组装 low-dim 与帧写入  
+文件：
+- low-dim 组装：`converter/pipeline/batch_processor.py`
+- 帧构建：`converter/pipeline/frame_builder.py`
+- 数据集 schema：`converter/pipeline/dataset_builder.py`
+动作：
+- 从 `aligned_batch` 提取状态/动作/imu/末端位姿等数值，构建 `all_low_dim_data`。
+- 按帧构建 `frame` 并写入 dataset（`dataset.add_frame`）。
+- 每个 batch 调用 `dataset.save_episode()` 落盘 parquet。
+
+6. batch 媒体与元数据收尾  
+文件：`converter/pipeline/batch_finalizer.py`  
+动作：
+- 保存相机参数、外参、batch metadata。
+- 依据配置将图像写临时目录或直接走流式编码队列。
+- 返回 batch 级统计信息（供全局 merge 使用）。
+
+7. 合并 batch 与生成最终数据集  
+文件：`converter/pipeline/batch_merger.py`  
+动作：
+- 合并 `data/chunk-*/` parquet。
+- 合并 `meta/` 下 episodes/info/tasks/stats 等文件。
+- 聚合最终 metadata 与统计，清理 batch 临时目录。
+
+8. 视频编码与最终产物输出  
+文件：`converter/media/video_orchestrator.py` + `converter/media/video_*`  
+动作：
+- 根据策略执行流式编码 / 分段编码 / 同步编码。
+- 输出 `videos/chunk-000/...`（及可选 `depth/chunk-000/...`）。
+- 最终得到完整 LeRobot 目录。
 
 ## 3. 当前目录结构与职责
 
@@ -44,26 +110,26 @@ port_pipeline.py
   - 可选下载 metadata、批处理多个输入目录、可选上传 OSS。
 
 ### 3.2 编排与写出
-- `converter/port_pipeline.py`
+- `converter.pipeline.conversion_orchestrator.py`
   - 转换总流程控制。
   - 选择串行/并行读 bag，选择视频策略（同步/异步/流式/分段）。
   - 批次合并与收尾。
 
-- `converter/pipeline/stream_population.py`
+- `converter.pipeline.batch_processor.py`
   - 单 bag 主循环（batch 处理）。
   - 从 `aligned_batch` 提取视觉和 low-dim，调用 frame 写入。
 
 - `converter/pipeline/frame_builder.py`
   - 逐帧写入 dataset 结构。
 
-- `converter/pipeline/stream_finalize.py`
+- `converter.pipeline.batch_finalizer.py`
   - 持久化媒体、写 batch metadata、保存参数。
 
 ### 3.3 Reader（读包 + 对齐）
-- `converter/reader/kuavo_dataset_slave_s.py`
-  - 兼容入口（re-export）。
+- `converter.reader.reader_entry.py`
+  - Reader 入口封装（当前对外入口）。
 
-- `converter/reader/kuavo_dataset_reader_impl.py`
+- `converter.reader.rosbag_reader.py`
   - Reader 主实现（topic 映射、预处理、对齐入口）。
 
 - `converter/reader/streaming_pipeline.py`
@@ -82,9 +148,6 @@ port_pipeline.py
   - `converter/reader/timestamp_*.py` / `alignment_*.py`：时间戳质量与修复。
 
 ### 3.4 数据与媒体工具
-- `converter/data_utils.py`
-  - 兼容导出层（老调用入口，实际实现在 `converter/data/*`）。
-
 - `converter/data/metadata_merge.py`
   - metadata/moments 合并、动作帧区间计算。
 
@@ -93,9 +156,6 @@ port_pipeline.py
 
 - `converter/data/episode_loader.py`
   - 单 episode 抽取与 low-dim 组织。
-
-- `converter/slave_utils.py`
-  - 兼容导出层（老调用入口，实际实现在 `converter/media/*`）。
 
 - `converter/media/camera_params.py`
   - 相机参数和原始图像提取工具。
@@ -106,7 +166,7 @@ port_pipeline.py
 - `converter/media/depth_video_export.py`
   - 深度视频导出函数。
 
-- `converter/video_pipeline.py`
+- `converter.media.video_orchestrator.py`
   - 视频编码主入口与编码器类。
 
 - `converter/media/video_workers.py`
@@ -119,10 +179,10 @@ port_pipeline.py
   - 从临时帧目录完成最终视频编码。
 
 ### 3.5 配置与常量
-- `converter/config.py`
+- `converter.configs.py`
   - 配置对象与默认值（默认 topic、相机 spec、切片规则）。
 
-- `converter/configs/joint_names.py`
+- `converter.configs/joint_names.py`
   - 关节名统一配置（如 `DEFAULT_LEG_JOINT_NAMES`）。
 
 ## 4. 常用运行方式
@@ -198,7 +258,7 @@ bash run.sh
 1. 在 `kuavo/configs/request.json` 中加入：
    - 非相机：`robot_profile.topics`
    - 相机：`robot_profile.cameras`（含 color/depth/camera_info）
-2. 若需全局默认，更新 `converter/config.py` 的：
+2. 若需全局默认，更新 `converter.configs.py` 的：
    - `DEFAULT_SOURCE_TOPICS`
    - `DEFAULT_CAMERA_TOPIC_SPECS`
 
@@ -217,24 +277,16 @@ bash run.sh
 - 避免同义 key 重复。
 
 ### 步骤 4：接入批处理组织
-在 `converter/pipeline/stream_population.py`：
+在 `converter.pipeline.batch_processor.py`：
 1. 从 `aligned_batch` 读取新 key。
 2. 需要入 low-dim 时加入 `all_low_dim_data`。
 3. 需要帧级写入时接入 `write_batch_frames` 参数。
-
-### 步骤 5：验证
-1. 小 bag 回归，观察日志是否有 KeyError/shape 错误。
-2. `LOG_LEVEL=DEBUG` 检查：
-   - 话题命中
-   - 对齐误差分布
-   - batch 帧数一致性
-3. 验证输出目录中的 parquet/meta/video 是否齐全。
 
 ## 8. 新增相机接入指南
 
 1. 在 `robot_profile.cameras` 新增相机 spec。
 2. 确认 `camera_topic_builder.py` 能生成该相机 key。
-3. 在 `stream_population.py` 的 `cameras = raw_config.default_camera_names` 流程下自动纳入（若配置正确通常无需改代码）。
+3. 在 `batch_processor.py` 的 `cameras = raw_config.default_camera_names` 流程下自动纳入（若配置正确通常无需改代码）。
 4. 检查相机内参/外参保存逻辑是否覆盖该相机。
 
 ## 9. 新机型适配指南
@@ -272,10 +324,3 @@ bash run.sh
 - 症状：末端位姿为空
   - 检查 `urdf_path` 是否正确。
   - 检查 `observation.sensorsData.joint_q` 是否存在且维度正确。
-
-## 12. 维护约定
-
-- 新能力优先加到子模块（`reader/`、`pipeline/`、`data/`、`media/`），避免重回超大单文件。
-- 常量统一放 `converter/config.py` 或 `converter/configs/*`。
-- 兼容层（如 `data_utils.py` / `slave_utils.py`）仅做导出，不放业务逻辑。
-

@@ -8,10 +8,10 @@ import logging
 import os
 import time
 
-import converter.custom_patches  # noqa: F401
-from converter.config import load_config_from_json
-from converter.data_utils import discover_bag_tasks_auto
-from converter.port_pipeline import port_kuavo_rosbag
+import converter.runtime.lerobot_compat_patch  # noqa: F401
+from converter.configs import load_config_from_json
+from converter.data.bag_discovery import discover_bag_tasks_auto
+from converter.pipeline.conversion_orchestrator import port_kuavo_rosbag
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,5 @@
 """Main conversion pipeline orchestration for Kuavo -> LeRobot."""
 
-import gc
-import json
 import logging
 import multiprocessing
 import os
@@ -13,37 +11,28 @@ import time
 import uuid
 from typing import Literal
 
-import numpy as np
-from converter.config import Config
-from converter.pipeline.dataset_builder import DatasetConfig, create_empty_dataset
-from converter.pipeline.frame_builder import write_batch_frames
-from converter.pipeline.stream_population import populate_dataset_stream
-from converter.pipeline.stream_finalize import (
-    persist_batch_media,
-    save_batch_metadata_json,
-    save_first_batch_parameters,
-)
-from converter.reader.kuavo_dataset_slave_s import (
-    KuavoRosbagReader,
+from converter.configs import Config
+from converter.pipeline.dataset_builder import DatasetConfig
+from converter.pipeline.batch_processor import populate_dataset_stream
+from converter.reader.reader_entry import (
     DEFAULT_ARM_JOINT_NAMES,
     DEFAULT_DEXHAND_JOINT_NAMES,
     DEFAULT_HEAD_JOINT_NAMES,
-    DEFAULT_JOINT_NAMES,
     DEFAULT_JOINT_NAMES_LIST,
     DEFAULT_LEG_JOINT_NAMES,
     DEFAULT_LEJUCLAW_JOINT_NAMES,
 )
-from converter.reader.postprocess_utils import PostProcessorUtils
-from converter.merge_batches import merge_meta_files, merge_metadata, merge_parquet_files, get_batch_dirs
-
-from converter.data_utils import (
-    _split_dexhand_lr,
-    get_bag_time_info,
-    get_time_range_from_moments,
-    is_valid_hand_data,
-    load_hand_data_worker,
+from converter.pipeline.batch_merger import (
+    get_batch_dirs,
+    merge_meta_files,
+    merge_metadata,
+    merge_parquet_files,
 )
-from converter.video_pipeline import (
+from converter.data.bag_discovery import get_bag_time_info
+from converter.data.common_utils import is_valid_hand_data
+from converter.data.episode_loader import load_hand_data_worker
+from converter.data.metadata_merge import get_time_range_from_moments
+from converter.media.video_orchestrator import (
     BatchSegmentEncoder,
     StreamingVideoEncoderManager,
     _encode_depth_camera_worker,
@@ -68,7 +57,7 @@ def port_kuavo_rosbag(
     dataset_name: str | None = None,
 ):
 
-    from converter.reader.kuavo_dataset_slave_s import (
+    from converter.reader.reader_entry import (
         KuavoRosbagReader,
         DEFAULT_JOINT_NAMES_LIST,
         DEFAULT_LEG_JOINT_NAMES,

@@ -52,7 +52,7 @@ def detect_and_trim_aligned_data(
     """
     检测并裁剪对齐后数据中的静止区域，头尾裁剪上限由首尾动作持续帧数的一半决定。
     """
-    from converter.slave_utils import detect_stillness_from_image_data
+    from converter.media.camera_flip import detect_stillness_from_image_data
 
     motion_threshold = 4.5
     stillness_ratio = 1
@@ -432,4 +432,3 @@ def fix_multimodal_start_alignment(
         print(f"  建议检查数据质量，当前最小模态间最大差值: {min_max_spread:.1f}ms")
 
     return main_timestamps
-
