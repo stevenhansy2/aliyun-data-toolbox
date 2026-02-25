@@ -324,3 +324,72 @@ bash run.sh
 - 症状：末端位姿为空
   - 检查 `urdf_path` 是否正确。
   - 检查 `observation.sensorsData.joint_q` 是否存在且维度正确。
+
+## 12. 脚本功能速查（逐文件）
+
+### 12.1 顶层入口与运行脚本
+- `master_generate_lerobot_s.py`：Python 主入口，解析参数并启动转换总编排。
+- `run.sh`：容器/平台统一入口，负责批处理、可选上传 OSS、总耗时统计。
+
+### 12.2 converter/pipeline
+- `converter/pipeline/conversion_orchestrator.py`：总编排入口，组织单/多 bag 的转换流程。
+- `converter/pipeline/batch_processor.py`：batch 主循环，执行读取、对齐、low-dim 组装与落盘。
+- `converter/pipeline/batch_finalizer.py`：batch 收尾（相机参数、metadata、媒体临时产物）。
+- `converter/pipeline/batch_merger.py`：合并批次输出（parquet/meta）并清理临时目录。
+- `converter/pipeline/dataset_builder.py`：创建 LeRobot 数据集对象与 schema。
+- `converter/pipeline/frame_builder.py`：逐帧写入 dataset。
+- `converter/pipeline/episode_stats_aggregator.py`：聚合 episode 级统计信息。
+- `converter/pipeline/__init__.py`：pipeline 包初始化。
+
+### 12.3 converter/reader
+- `converter/reader/reader_entry.py`：Reader 对外统一入口。
+- `converter/reader/rosbag_reader.py`：读 bag 主实现（话题映射、消息解析、对齐入口）。
+- `converter/reader/streaming_pipeline.py`：流式读取与分批处理核心。
+- `converter/reader/parallel_worker.py`：并行读取 worker 逻辑。
+- `converter/reader/alignment_engine.py`：多模态对齐主引擎。
+- `converter/reader/alignment_postprocess.py`：对齐后处理与结果修整。
+- `converter/reader/alignment_validation.py`：对齐质量验证。
+- `converter/reader/frame_rate_adjust.py`：帧率对齐（插帧/抽帧）。
+- `converter/reader/on_demand_interpolation.py`：按需插值工具。
+- `converter/reader/timeline_prescan.py`：主时间线预扫描与切片辅助。
+- `converter/reader/timestamp_ops.py`：时间戳通用操作。
+- `converter/reader/timestamp_preprocess.py`：时间戳预处理。
+- `converter/reader/timestamp_quality.py`：时间戳质量检查。
+- `converter/reader/source_topic_probe.py`：源话题可用性探测。
+- `converter/reader/topic_map_builder.py`：非相机话题映射构建。
+- `converter/reader/camera_topic_builder.py`：相机话题映射构建。
+- `converter/reader/message_processor.py`：ROS 消息解析到统一数据结构。
+- `converter/reader/eef_builder.py`：末端位姿相关数据构建。
+- `converter/reader/postprocess_utils.py`：reader 阶段后处理工具。
+- `converter/reader/__init__.py`：reader 包初始化。
+
+### 12.4 converter/media 与 image
+- `converter/media/video_orchestrator.py`：视频处理总入口（同步/流式/分段编码策略）。
+- `converter/media/video_workers.py`：单相机视频编码 worker。
+- `converter/media/video_segments.py`：分段编码与拼接逻辑。
+- `converter/media/video_finalize.py`：从临时帧目录生成最终视频文件。
+- `converter/media/depth_video_export.py`：深度视频导出。
+- `converter/media/camera_params.py`：相机内参/外参及相关参数写出。
+- `converter/media/camera_flip.py`：左右相机翻转/互换规则。
+- `converter/media/__init__.py`：media 包初始化。
+- `converter/image/depth_conversion.py`：深度图转换基础实现。
+- `converter/image/video_denoising.py`：深度图去噪工具。
+- `converter/image/__init__.py`：image 包初始化。
+
+### 12.5 converter/data
+- `converter/data/bag_discovery.py`：bag 发现、sidecar（metadata/moments）解析、任务生成。
+- `converter/data/episode_loader.py`：单 episode 数据加载与 low-dim 组织。
+- `converter/data/metadata_merge.py`：metadata/moments 合并、动作帧区间计算。
+- `converter/data/common_utils.py`：data 层公共工具函数。
+- `converter/data/__init__.py`：data 包初始化。
+
+### 12.6 converter/configs 与 runtime
+- `converter/configs/runtime_config.py`：运行时配置定义与 request.json 解析。
+- `converter/configs/joint_names.py`：关节名常量与配置。
+- `converter/configs/__init__.py`：configs 包初始化。
+- `converter/runtime/lerobot_compat_patch.py`：LeRobot 兼容性补丁。
+- `converter/runtime/__init__.py`：runtime 包初始化。
+- `converter/kinematics/kuavo_pose_calculator.py`：URDF 驱动的相机/末端位姿计算。
+- `converter/kinematics/endeffector_pose.py`：末端位姿历史实现（兼容保留）。
+- `converter/kinematics/__init__.py`：kinematics 包初始化。
+- `converter/__init__.py`：converter 根包初始化。

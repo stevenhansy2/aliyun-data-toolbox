@@ -1,0 +1,26 @@
+{
+  "output_dir": "/tmp/ks_download/6",
+  "upload_dir": "kuavo-test/datahub/test/",
+  "id": "v0",
+  "topics": [],
+  "train_frequency": 30,
+  "main_timeline":{
+    "topic": "/cam_h/color/image_raw/compressed",
+    "frequency": 30
+  },
+  "only_arm": false,
+  "eef_type": "dex_hand",
+  "which_arm": "both",
+  "dex_dof_needed": 6,
+  "img_resize":{
+    "width": 848,
+    "height": 480
+  },
+  "bags": [
+    { "link": "kuavo-test/datahub/test/Task24_grab_new_20250517_213901_0.bag", "start": 0, "end": 1 }
+  ],
+  "is_binary": false,
+  "is_delta_action": false,
+  "is_relative_start": false
+
+}
