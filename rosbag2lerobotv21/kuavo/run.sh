@@ -20,7 +20,6 @@ FOLDER_ID="${FOLDER_ID:-}"
 ACCESS_KEY_ID="${ACCESS_KEY_ID:-LTAI5tEs3xD65oJHSAF8S7fJ}"
 ACCESS_KEY_SECRET="${ACCESS_KEY_SECRET:-gpcIcxhVUT0ybGqlvNoNrNkb13suIs}"
 ENDPOINT="${ENDPOINT:-oss-cn-hangzhou.aliyuncs.com}"
-KUAVO_AUTH="${KUAVO_AUTH:-}"
 MASTER_TIMEOUT_SEC="${MASTER_TIMEOUT_SEC:-36000}"
 
 # 转换参数：当前仓库仅保留 _s 逻辑
@@ -83,32 +82,13 @@ for DATA_DIR in "${DATA_DIRS[@]}"; do
 
   echo "========== 处理 data_id: $data_id =========="
 
-  # 获取 metadata.json（优先使用输入目录已有文件；否则下载到可写输出目录）
+  # 检测 metadata.json（默认放在输入目录）
   METADATA_JSON_PATH="$DATA_DIR/metadata.json"
-  if [[ -f "$METADATA_JSON_PATH" ]]; then
-    echo "⚠️ 已存在 metadata.json，跳过下载"
-  else
-    if [[ -z "$KUAVO_AUTH" ]]; then
-      echo "⚠️ 缺少 KUAVO_AUTH，且输入目录没有 metadata.json，跳过元数据下载"
-      METADATA_JSON_PATH=""
-    else
-      METADATA_JSON_PATH="$OUTPUT_DIR/metadata_${data_id}.json"
-      mkdir -p "$(dirname "$METADATA_JSON_PATH")"
-      if curl -sS -L -H "kuavo-auth: bearer $KUAVO_AUTH" \
-        "https://dev.lejugym.com/api/kuavo-task/data/detail-with-mark?id=$data_id" \
-        | jq '.data' > "$METADATA_JSON_PATH"; then
-        echo "✅ metadata.json 下载成功: $METADATA_JSON_PATH"
-      else
-        echo "❌ metadata.json 下载失败 (data_id: $data_id)"
-        rm -f "$METADATA_JSON_PATH"
-        METADATA_JSON_PATH=""
-      fi
-    fi
-  fi
-
   if [[ ! -f "$METADATA_JSON_PATH" ]]; then
     echo "⚠️ 缺少 metadata.json，继续转换（将不合并 metadata）: $METADATA_JSON_PATH"
     METADATA_JSON_PATH=""
+  else
+    echo "✅ 检测到 metadata.json: $METADATA_JSON_PATH"
   fi
 
   if ! find "$DATA_DIR" -maxdepth 1 -name "*.bag" -print -quit | grep -q .; then
