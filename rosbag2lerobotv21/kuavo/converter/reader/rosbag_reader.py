@@ -696,7 +696,8 @@ class KuavoRosbagReader:
         return aligned_data
 
     def list_bag_files(self, bag_dir: str):
-        return sorted(glob.glob(os.path.join(bag_dir, "*.bag")))
+        bag_files = sorted(glob.glob(os.path.join(bag_dir, "*.bag")))
+        return [p for p in bag_files if not p.endswith(".c.bag")]
 
     def process_rosbag_dir(self, bag_dir: str):
         all_data = []

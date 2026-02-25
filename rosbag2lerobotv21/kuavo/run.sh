@@ -68,7 +68,7 @@ mkdir -p "$OUTPUT_DIR_DATA"
 
 mapfile -t DATA_DIRS < <(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
 if [[ ${#DATA_DIRS[@]} -eq 0 ]]; then
-  if find "$INPUT_DIR" -maxdepth 1 -name "*.bag" -print -quit | grep -q .; then
+  if find "$INPUT_DIR" -maxdepth 1 -type f -name "*.bag" ! -name "*.c.bag" -print -quit | grep -q .; then
     DATA_DIRS=("$INPUT_DIR")
     echo "ℹ️ INPUT_DIR 顶层检测到 bag 文件，按单目录批量模式处理: $INPUT_DIR"
   else
@@ -91,11 +91,11 @@ for DATA_DIR in "${DATA_DIRS[@]}"; do
     echo "✅ 检测到 metadata.json: $METADATA_JSON_PATH"
   fi
 
-  if ! find "$DATA_DIR" -maxdepth 1 -name "*.bag" -print -quit | grep -q .; then
+  if ! find "$DATA_DIR" -maxdepth 1 -type f -name "*.bag" ! -name "*.c.bag" -print -quit | grep -q .; then
     echo "❌ 未找到 .bag 文件: $DATA_DIR"
     exit 1
   fi
-  ROSBAG_COUNT=$(find "$DATA_DIR" -maxdepth 1 -name "*.bag" | wc -l)
+  ROSBAG_COUNT=$(find "$DATA_DIR" -maxdepth 1 -type f -name "*.bag" ! -name "*.c.bag" | wc -l)
 
   echo "✅ 输入文件检查通过"
   echo "📊 发现 $ROSBAG_COUNT 个 rosbag 文件"

@@ -5,6 +5,11 @@ import os
 
 import rosbag
 
+
+def _is_valid_bag_file(file_name: str) -> bool:
+    return file_name.endswith(".bag") and not file_name.endswith(".c.bag")
+
+
 def get_bag_time_info(bag_path: str) -> dict:
     """
     获取 rosbag 包的时间信息
@@ -58,7 +63,7 @@ def get_bag_time_info(bag_path: str) -> dict:
 def list_bag_files_auto(raw_dir):
     bag_files = []
     for i, fname in enumerate(sorted(os.listdir(raw_dir))):
-        if fname.endswith(".bag"):
+        if _is_valid_bag_file(fname):
             bag_files.append(
                 {
                     "link": "",  # 保持为空
@@ -124,7 +129,7 @@ def discover_bag_tasks_auto(
     tasks: list[dict] = []
 
     bag_paths: list[str] = []
-    if os.path.isfile(raw_dir) and raw_dir.endswith(".bag"):
+    if os.path.isfile(raw_dir) and _is_valid_bag_file(raw_dir):
         bag_paths = [os.path.abspath(raw_dir)]
         root_dir = os.path.dirname(os.path.abspath(raw_dir))
     else:
@@ -132,7 +137,7 @@ def discover_bag_tasks_auto(
         # 顶层 .bag
         for fname in sorted(os.listdir(root_dir)):
             p = os.path.join(root_dir, fname)
-            if os.path.isfile(p) and fname.endswith(".bag"):
+            if os.path.isfile(p) and _is_valid_bag_file(fname):
                 bag_paths.append(p)
         # 顶层子目录内 .bag（只下探一层）
         for entry in sorted(os.listdir(root_dir)):
@@ -141,7 +146,7 @@ def discover_bag_tasks_auto(
                 continue
             for fname in sorted(os.listdir(subdir)):
                 p = os.path.join(subdir, fname)
-                if os.path.isfile(p) and fname.endswith(".bag"):
+                if os.path.isfile(p) and _is_valid_bag_file(fname):
                     bag_paths.append(p)
 
     name_count: dict[str, int] = {}
@@ -170,4 +175,3 @@ def discover_bag_tasks_auto(
         )
 
     return tasks
-
