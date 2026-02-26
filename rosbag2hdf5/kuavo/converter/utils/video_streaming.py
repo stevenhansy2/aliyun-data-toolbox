@@ -1,8 +1,9 @@
 import os
-import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from queue import Queue
-from threading import Thread
+from threading import Semaphore, Thread
 
 import cv2
 import numpy as np
@@ -11,10 +12,51 @@ from converter.image.video_denoising import repair_depth_noise_focused
 from converter.utils.camera_utils import get_mapped_filename
 
 
+@dataclass(frozen=True)
+class StageSchedule:
+    cores: int
+    decode_feed_workers: int
+    max_encode_processes: int
+    queue_limit: int
+
+
+_SCHEDULES = {
+    1: StageSchedule(cores=1, decode_feed_workers=1, max_encode_processes=1, queue_limit=96),
+    2: StageSchedule(cores=2, decode_feed_workers=2, max_encode_processes=1, queue_limit=160),
+    4: StageSchedule(cores=4, decode_feed_workers=3, max_encode_processes=2, queue_limit=260),
+    8: StageSchedule(cores=8, decode_feed_workers=4, max_encode_processes=3, queue_limit=400),
+}
+
+
+def _resolve_schedule(raw_config, queue_limit_override: int | None = None) -> StageSchedule:
+    """
+    调度策略（颜色/深度路径）:
+    - 1核: decode_feed=1, encode=1
+    - 2核: decode_feed=2, encode=1
+    - 4核: decode_feed=3, encode=2
+    - 8核: decode_feed=4, encode=3
+    """
+    cfg_cores = int(getattr(raw_config, "schedule_cores", 0) or 0) if raw_config is not None else 0
+    env_cores = int(os.getenv("KUAVO_SCHED_CORES", "0") or 0)
+    req = env_cores if env_cores in _SCHEDULES else cfg_cores
+    if req not in _SCHEDULES:
+        host = os.cpu_count() or 1
+        req = 8 if host >= 8 else (4 if host >= 4 else (2 if host >= 2 else 1))
+    base = _SCHEDULES[req]
+    if queue_limit_override is None:
+        return base
+    return StageSchedule(
+        cores=base.cores,
+        decode_feed_workers=base.decode_feed_workers,
+        max_encode_processes=base.max_encode_processes,
+        queue_limit=queue_limit_override,
+    )
+
+
 class StreamingVideoWriter:
     """
-    流式视频写入器：通过 bounded queue 接收帧，worker 线程将帧写入临时目录，
-    finish() 时调用 ffmpeg 编码。
+    流式视频写入器：通过 bounded queue 接收帧，worker 线程解码后直接通过
+    ffmpeg stdin pipe 编码（不落盘 PNG 临时帧）。
 
     用法:
         writer = StreamingVideoWriter("head_cam_h", output_dir, raw_config, is_depth=False)
@@ -33,6 +75,7 @@ class StreamingVideoWriter:
         is_depth: bool = False,
         is_16bit_depth: bool = False,
         queue_limit: int = 300,
+        encoder_semaphore: Semaphore | None = None,
     ):
         self.cam_name = cam_name
         self.output_dir = output_dir
@@ -40,6 +83,7 @@ class StreamingVideoWriter:
         self.is_depth = is_depth
         self.is_16bit_depth = is_16bit_depth
         self.queue_limit = queue_limit
+        self._encoder_semaphore = encoder_semaphore
 
         self._queue = Queue(maxsize=queue_limit)
         self._frame_count = 0
@@ -49,10 +93,11 @@ class StreamingVideoWriter:
         self._height = None
         self._finished = False
         self._error = None
+        self._ffmpeg_proc = None
+        self._encoder_sem_acquired = False
 
-        # 临时目录
-        self._temp_dir = os.path.join(output_dir, f"streaming_frames_{cam_name}")
-        os.makedirs(self._temp_dir, exist_ok=True)
+        # 统一采用 ffmpeg pipe 直写，不使用临时帧目录
+        self._temp_dir = None
 
         # 启动 worker 线程
         self._worker = Thread(target=self._write_worker, daemon=True)
@@ -99,12 +144,7 @@ class StreamingVideoWriter:
         if self._error:
             raise self._error
 
-        # 调用 ffmpeg 编码
-        if self._written_count > 0:
-            self._encode_video()
-
-        # 清理临时目录
-        shutil.rmtree(self._temp_dir, ignore_errors=True)
+        self._finalize_encoder()
 
         return self._get_stats()
 
@@ -145,12 +185,14 @@ class StreamingVideoWriter:
                 if img is None:
                     continue
 
-                # 写入临时文件
-                img_path = os.path.join(self._temp_dir, f"frame_{idx:05d}.png")
-                if self.is_16bit_depth:
-                    cv2.imwrite(img_path, img.astype(np.uint16))
+                self._start_encoder_if_needed(img.shape[1], img.shape[0])
+                if self.is_depth:
+                    if self.is_16bit_depth:
+                        self._ffmpeg_proc.stdin.write(img.astype(np.uint16, copy=False).tobytes())
+                    else:
+                        self._ffmpeg_proc.stdin.write(img.astype(np.uint8, copy=False).tobytes())
                 else:
-                    cv2.imwrite(img_path, img)
+                    self._ffmpeg_proc.stdin.write(img.tobytes())
 
                 self._written_count += 1
                 if self._written_count % 300 == 0:
@@ -226,8 +268,13 @@ class StreamingVideoWriter:
             if self._width is None:
                 self._height, self._width = img.shape
 
-        # 手部相机去噪
-        if is_hand_camera:
+        # 手部相机去噪（可开关）
+        denoise_enabled = bool(
+            getattr(self.raw_config, "enable_depth_denoise", True)
+            if self.raw_config is not None
+            else True
+        )
+        if is_hand_camera and denoise_enabled:
             try:
                 img = repair_depth_noise_focused(
                     img,
@@ -241,75 +288,90 @@ class StreamingVideoWriter:
 
         return img
 
-    def _encode_video(self):
-        """调用 ffmpeg 编码视频"""
+    def _start_encoder_if_needed(self, width: int, height: int):
+        if self._ffmpeg_proc is not None:
+            return
+        if self._encoder_semaphore is not None:
+            self._encoder_semaphore.acquire()
+            self._encoder_sem_acquired = True
+
+        output_ext = ".mkv" if self.is_depth else ".mp4"
+        output_filename = get_mapped_filename(self.cam_name, output_ext)
+        video_path = os.path.join(self.output_dir, output_filename)
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray16le" if self.is_depth and self.is_16bit_depth else ("gray" if self.is_depth else "bgr24"),
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            "30",
+            "-i",
+            "-",
+        ]
         if self.is_depth:
-            if self.is_16bit_depth:
-                self._encode_depth_16bit()
-            else:
-                self._encode_depth_8bit()
+            ffmpeg_cmd.extend(
+                [
+                    "-an",
+                    "-c:v",
+                    "ffv1",
+                    "-pix_fmt",
+                    "gray16le" if self.is_16bit_depth else "gray",
+                    video_path,
+                ]
+            )
         else:
-            self._encode_color()
+            preset = getattr(self.raw_config, "color_video_preset", "fast")
+            crf = str(getattr(self.raw_config, "color_video_crf", 18))
+            ffmpeg_cmd.extend(
+                [
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    preset,
+                    "-crf",
+                    crf,
+                    video_path,
+                ]
+            )
+        self._ffmpeg_proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
-    def _encode_color(self):
-        """编码彩色视频 (h264)"""
-        output_filename = get_mapped_filename(self.cam_name, ".mp4")
-        video_path = os.path.join(self.output_dir, output_filename)
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-framerate", "30",
-            "-i", os.path.join(self._temp_dir, "frame_%05d.png"),
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "18",
-            video_path,
-        ]
+    def _finalize_encoder(self):
+        if self._ffmpeg_proc is None:
+            if self._encoder_sem_acquired and self._encoder_semaphore is not None:
+                self._encoder_semaphore.release()
+                self._encoder_sem_acquired = False
+            return
         try:
-            subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-            log_print(f"[StreamingVideoWriter] 已保存彩色视频: {video_path} ({self._written_count} 帧)")
-        except subprocess.CalledProcessError as e:
-            log_print(f"[StreamingVideoWriter] ffmpeg编码失败 {self.cam_name}: {e.stderr.decode() if e.stderr else e}")
-
-    def _encode_depth_8bit(self):
-        """编码8位深度视频 (ffv1 gray)"""
-        output_filename = get_mapped_filename(self.cam_name, ".mkv")
-        video_path = os.path.join(self.output_dir, output_filename)
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-framerate", "30",
-            "-i", os.path.join(self._temp_dir, "frame_%05d.png"),
-            "-c:v", "ffv1",
-            "-pix_fmt", "gray",
-            "-level", "3",
-            "-g", "1",
-            "-slicecrc", "1",
-            "-slices", "16",
-            "-an",
-            video_path,
-        ]
-        try:
-            subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-            log_print(f"[StreamingVideoWriter] 已保存深度视频: {video_path} ({self._written_count} 帧)")
-        except subprocess.CalledProcessError as e:
-            log_print(f"[StreamingVideoWriter] ffmpeg编码失败 {self.cam_name}: {e.stderr.decode() if e.stderr else e}")
-
-    def _encode_depth_16bit(self):
-        """编码16位深度视频 (ffv1 gray16le)"""
-        output_filename = get_mapped_filename(self.cam_name, ".mkv")
-        video_path = os.path.join(self.output_dir, output_filename)
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-framerate", "30",
-            "-i", os.path.join(self._temp_dir, "frame_%05d.png"),
-            "-c:v", "ffv1",
-            "-pix_fmt", "gray16le",
-            video_path,
-        ]
-        try:
-            subprocess.run(ffmpeg_cmd, check=True, capture_output=True)
-            log_print(f"[StreamingVideoWriter] 已保存16位深度视频: {video_path} ({self._written_count} 帧)")
-        except subprocess.CalledProcessError as e:
-            log_print(f"[StreamingVideoWriter] ffmpeg编码失败 {self.cam_name}: {e.stderr.decode() if e.stderr else e}")
+            if self._ffmpeg_proc.stdin is not None:
+                self._ffmpeg_proc.stdin.close()
+            rc = self._ffmpeg_proc.wait()
+            err = b""
+            if self._ffmpeg_proc.stderr is not None:
+                err = self._ffmpeg_proc.stderr.read()
+            if rc != 0:
+                err = err.decode("utf-8", errors="ignore")
+                raise RuntimeError(f"ffmpeg编码失败 {self.cam_name}: {err}")
+            output_ext = ".mkv" if self.is_depth else ".mp4"
+            output_filename = get_mapped_filename(self.cam_name, output_ext)
+            video_path = os.path.join(self.output_dir, output_filename)
+            if self.is_depth:
+                log_print(f"[StreamingVideoWriter] 已保存深度视频: {video_path} ({self._written_count} 帧)")
+            else:
+                log_print(f"[StreamingVideoWriter] 已保存彩色视频: {video_path} ({self._written_count} 帧)")
+        finally:
+            if self._encoder_sem_acquired and self._encoder_semaphore is not None:
+                self._encoder_semaphore.release()
+                self._encoder_sem_acquired = False
 
 
 def save_color_videos_streaming(
@@ -334,6 +396,15 @@ def save_color_videos_streaming(
         统计信息 dict: {cam_name: stats_dict}
     """
     os.makedirs(output_dir, exist_ok=True)
+    schedule = _resolve_schedule(raw_config, queue_limit_override=queue_limit)
+    encoder_semaphore = Semaphore(schedule.max_encode_processes)
+    log_print(
+        "[SCHEDULE] color streaming:"
+        f" cores={schedule.cores}"
+        f" decode_feed_workers={schedule.decode_feed_workers}"
+        f" encode_processes={schedule.max_encode_processes}"
+        f" queue_limit={schedule.queue_limit}"
+    )
 
     # 1. 创建所有 writers
     writers = {}
@@ -344,14 +415,20 @@ def save_color_videos_streaming(
             raw_config=raw_config,
             is_depth=False,
             is_16bit_depth=False,
-            queue_limit=queue_limit,
+            queue_limit=schedule.queue_limit,
+            encoder_semaphore=encoder_semaphore,
         )
 
-    # 2. 并行喂帧（每个 writer 的 worker 线程会异步写入）
-    for cam_name, imgs in imgs_per_cam_color.items():
+    # 2. 三路（多路）并行喂帧（避免按camera串行）
+    def _feed_one_camera(cam_name: str, imgs):
         writer = writers[cam_name]
         for frame_bytes in imgs:
             writer.put(frame_bytes)
+
+    with ThreadPoolExecutor(max_workers=schedule.decode_feed_workers) as ex:
+        futures = [ex.submit(_feed_one_camera, cam_name, imgs) for cam_name, imgs in imgs_per_cam_color.items()]
+        for f in futures:
+            f.result()
 
     # 3. 完成所有 writers
     all_stats = {}
@@ -386,6 +463,15 @@ def save_depth_videos_16U_streaming(
         统计信息 dict: {cam_name: stats_dict}
     """
     os.makedirs(output_dir, exist_ok=True)
+    schedule = _resolve_schedule(raw_config, queue_limit_override=queue_limit)
+    encoder_semaphore = Semaphore(schedule.max_encode_processes)
+    log_print(
+        "[SCHEDULE] depth streaming:"
+        f" cores={schedule.cores}"
+        f" decode_feed_workers={schedule.decode_feed_workers}"
+        f" encode_processes={schedule.max_encode_processes}"
+        f" queue_limit={schedule.queue_limit}"
+    )
 
     # 1. 创建所有 writers
     writers = {}
@@ -396,14 +482,20 @@ def save_depth_videos_16U_streaming(
             raw_config=raw_config,
             is_depth=True,
             is_16bit_depth=True,
-            queue_limit=queue_limit,
+            queue_limit=schedule.queue_limit,
+            encoder_semaphore=encoder_semaphore,
         )
 
     # 2. 并行喂帧
-    for cam_name, imgs in imgs_per_cam_depth.items():
+    def _feed_one_camera(cam_name: str, imgs):
         writer = writers[cam_name]
         for frame_bytes in imgs:
             writer.put(frame_bytes)
+
+    with ThreadPoolExecutor(max_workers=schedule.decode_feed_workers) as ex:
+        futures = [ex.submit(_feed_one_camera, cam_name, imgs) for cam_name, imgs in imgs_per_cam_depth.items()]
+        for f in futures:
+            f.result()
 
     # 3. 完成所有 writers
     all_stats = {}

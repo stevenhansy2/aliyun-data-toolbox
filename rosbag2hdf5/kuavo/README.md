@@ -85,6 +85,17 @@ bash run.sh
 - `INPUT_DIR`, `OUTPUT_DIR`
 - `MIN_DURATION`
 - `OSS_BUCKET`, `FOLDER_ID`（可选上传）
+- 性能调优（可选）：
+  - `KUAVO_VALIDATE_OUTPUT=false` 跳过最终一致性校验（更快）
+  - `KUAVO_ENHANCE_ENABLED=false` 关闭压缩深度增强（更快）
+  - `KUAVO_ENABLE_DEPTH_DENOISE=false` 关闭手部深度去噪（更快）
+  - `KUAVO_COLOR_PRESET=veryfast` 或 `ultrafast`（更快，体积更大）
+  - `KUAVO_COLOR_CRF=22`（更快，画质略降）
+  - `KUAVO_SCHED_CORES=1|2|4|8` 视频调度档位（彩色+深度，解码喂帧/编码并发）
+    - `1`: decode_feed=1, encode=1, queue=96
+    - `2`: decode_feed=2, encode=1, queue=160
+    - `4`: decode_feed=3, encode=2, queue=260
+    - `8`: decode_feed=4, encode=3, queue=400
 
 ## 5. 开发约定
 
