@@ -27,6 +27,7 @@ def _build_output_state_action(
     slice_robot,
     slice_claw,
     merge_hand_position: bool,
+    inline_dexhand_in_state_action: bool,
     use_leju_claw_batch: bool,
 ):
     if only_half_up_body:
@@ -90,7 +91,7 @@ def _build_output_state_action(
             output_state = np.array(state[i, :], dtype=np.float32)
             output_action = np.array(action[i, :], dtype=np.float32)
 
-    if merge_hand_position:
+    if inline_dexhand_in_state_action or merge_hand_position:
         left_pos = (
             hand_state_left[i]
             if hand_state_left is not None and len(hand_state_left) > i
@@ -113,6 +114,9 @@ def _build_output_state_action(
         )
         output_state = np.concatenate((output_state, left_pos, right_pos), axis=0)
         output_action = np.concatenate((output_action, left_act, right_act), axis=0)
+        if inline_dexhand_in_state_action and merge_hand_position:
+            output_state = np.concatenate((output_state, left_pos, right_pos), axis=0)
+            output_action = np.concatenate((output_action, left_act, right_act), axis=0)
 
     return output_state, output_action
 
@@ -144,6 +148,8 @@ def write_batch_frames(
     use_qiangnao: bool,
 ):
     separate_video_storage = getattr(raw_config, "separate_video_storage", False)
+    separate_hand_fields = getattr(raw_config, "separate_hand_fields", False)
+    inline_dexhand_in_state_action = bool(use_qiangnao and not separate_hand_fields)
 
     for i in range(num_frames):
         output_state, output_action = _build_output_state_action(
@@ -161,6 +167,7 @@ def write_batch_frames(
             slice_robot=slice_robot,
             slice_claw=slice_claw,
             merge_hand_position=merge_hand_position,
+            inline_dexhand_in_state_action=inline_dexhand_in_state_action,
             use_leju_claw_batch=use_leju_claw_batch,
         )
 
