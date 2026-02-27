@@ -153,6 +153,8 @@ class Config:
     use_pipeline_encoding: bool = False  # 启用流水线编码（批处理与视频编码并行）
     use_streaming_video: bool = False  # 启用流式视频编码（无需临时文件）
     video_queue_limit: int = 100  # 流式编码队列上限（背压控制）
+    schedule_cores: int = 0  # 调度档位，0 表示自动（可被 KUAVO_SCHED_CORES 覆盖）
+    video_process_timeout_sec: int = 600  # 单个视频编码子进程超时秒数
     use_parallel_rosbag_read: bool = False  # 启用并行 ROSbag 读取（2进程）
     parallel_rosbag_workers: int = 2  # 并行读取的 worker 数量（建议 2）
 
@@ -468,6 +470,13 @@ def load_config_from_json(config_path: str) -> Config:
         main_timeline_fps=main_timeline_fps,
         separate_hand_fields=config_dict.get("separate_hand_fields", False),
         merge_hand_position=config_dict.get("merge_hand_position", False),
+        use_pipeline_encoding=config_dict.get("use_pipeline_encoding", False),
+        use_streaming_video=config_dict.get("use_streaming_video", False),
+        video_queue_limit=config_dict.get("video_queue_limit", 100),
+        schedule_cores=config_dict.get("schedule_cores", 0),
+        video_process_timeout_sec=config_dict.get("video_process_timeout_sec", 600),
+        use_parallel_rosbag_read=config_dict.get("use_parallel_rosbag_read", False),
+        parallel_rosbag_workers=config_dict.get("parallel_rosbag_workers", 2),
         robot_model=config_dict.get("robot_model", profile_model),
         urdf_path=config_dict.get("urdf_path", profile_urdf),
         main_timeline_key=main_timeline_key,

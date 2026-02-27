@@ -38,6 +38,8 @@ from converter.media.video_orchestrator import (
     _encode_depth_camera_worker,
     encode_complete_videos_from_temp,
 )
+from converter.media.schedule import resolve_video_process_timeout_sec, resolve_video_schedule
+from converter.media.video_finalize import _join_with_timeout_or_raise
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +250,15 @@ def port_kuavo_rosbag(
     else:
         use_pipeline_encoding = getattr(raw_config, "use_pipeline_encoding", False)
 
+    schedule = resolve_video_schedule(raw_config)
+    logger.info(
+        "[SCHEDULE] 视频调度: cores=%s pipeline_workers=%s encode_processes=%s queue_limit=%s",
+        schedule.cores,
+        schedule.pipeline_workers,
+        schedule.max_encode_processes,
+        schedule.queue_limit,
+    )
+
     if use_pipeline_encoding and getattr(raw_config, "separate_video_storage", False):
         temp_video_dir = os.path.join("/tmp", "kuavo_video_temp", episode_uuid)
         segment_dir = os.path.join("/tmp", "kuavo_video_segments", episode_uuid)
@@ -261,7 +272,7 @@ def port_kuavo_rosbag(
             train_hz=raw_config.train_hz,
             uuid_str=episode_uuid,
             chunk_size=800,  # 固定批次大小
-            max_workers=3,  # 3个相机，3个工作线程
+            max_workers=schedule.pipeline_workers,
         )
 
     # 如果启用流式编码，创建编码器（优先级高于 pipeline_encoder）
@@ -282,11 +293,8 @@ def port_kuavo_rosbag(
             pipeline_encoder = None
 
         video_output_dir = base_root
-        queue_limit = int(
-            os.environ.get(
-                "VIDEO_QUEUE_LIMIT", getattr(raw_config, "video_queue_limit", 100)
-            )
-        )
+        default_queue_limit = getattr(raw_config, "video_queue_limit", schedule.queue_limit)
+        queue_limit = int(os.environ.get("VIDEO_QUEUE_LIMIT", default_queue_limit))
 
         streaming_encoder = StreamingVideoEncoderManager(
             cameras=raw_config.default_camera_names,
@@ -330,6 +338,7 @@ def port_kuavo_rosbag(
     base_path = Path(base_root).resolve()
     output_dir = base_path
     encoding_thread = None
+    encoding_error = []
 
     if getattr(raw_config, "separate_video_storage", False):
         temp_video_dir = os.path.join("/tmp", "kuavo_video_temp", episode_uuid)
@@ -351,6 +360,7 @@ def port_kuavo_rosbag(
                         use_depth=use_depth,
                     )
                 except Exception as e:
+                    encoding_error.append(e)
                     logger.exception("[VIDEO] 异步编码出错: %s", e)
 
             encoding_thread = threading.Thread(target=async_encode, daemon=False)
@@ -431,8 +441,11 @@ def port_kuavo_rosbag(
                         )
                         p.start()
                         depth_procs.append(p)
-                    for p in depth_procs:
-                        p.join()
+                    _join_with_timeout_or_raise(
+                        depth_procs,
+                        "DEPTH",
+                        resolve_video_process_timeout_sec(raw_config),
+                    )
                     logger.info("[VIDEO] 深度视频编码完成")
                     # 清理深度临时目录
                     shutil.rmtree(depth_temp_dir, ignore_errors=True)
@@ -444,8 +457,12 @@ def port_kuavo_rosbag(
             print(f"[VIDEO] 所有视频已保存到: {video_output_dir}")
 
         elif encoding_thread is not None:
-            # 异步编码已提前启动，只需输出状态
-            print("[INFO] 主流程已完成，视频编码在后台继续...")
+            # 异步编码已提前启动，此处等待结束并向上抛出错误
+            print("[INFO] 主流程已完成，等待后台视频编码结束...")
+            encoding_thread.join()
+            if encoding_error:
+                raise RuntimeError(f"异步视频编码失败: {encoding_error[0]}")
+            print(f"[VIDEO] 所有视频已保存到: {video_output_dir}")
 
         else:
             # 同步编码（等待完成）

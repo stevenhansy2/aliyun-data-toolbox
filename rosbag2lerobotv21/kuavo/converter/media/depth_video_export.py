@@ -9,6 +9,7 @@ import tempfile
 import cv2
 import numpy as np
 from converter.configs import Config
+from converter.media.schedule import resolve_video_schedule
 from converter.image.depth_conversion import process_depth_image_optimized
 
 def save_one_color_video_ffmpeg(cam_name, imgs, output_dir, raw_config):
@@ -274,7 +275,13 @@ def save_depth_videos_16U_parallel(
         print(f"{k}: {len(v)} 帧")
     
     num_cameras = len(imgs_per_cam_depth)
-    with concurrent.futures.ProcessPoolExecutor(max_workers=min(3, num_cameras)) as executor:
+    sched = resolve_video_schedule(raw_config)
+    max_workers = max(1, min(sched.max_encode_processes, num_cameras))
+    print(
+        f"[SCHEDULE] depth16U: cores={sched.cores}, max_encode_processes={sched.max_encode_processes}, "
+        f"workers={max_workers}"
+    )
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         for cam_name, imgs in imgs_per_cam_depth.items():
             print(f"[DEBUG] 提交 {cam_name} 到进程池, 帧数: {len(imgs)}")
@@ -604,4 +611,3 @@ def save_depth_videos_enhanced_parallel(
     for cam_name, depth_imgs in compressed_group.items():
         save_one_enhanced_depth_video(cam_name, depth_imgs)
     print(f"[ENHANCED] 所有增强深度视频处理完成")
-
