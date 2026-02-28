@@ -157,6 +157,7 @@ class Config:
     video_process_timeout_sec: int = 600  # 单个视频编码子进程超时秒数
     use_parallel_rosbag_read: bool = False  # 启用并行 ROSbag 读取（2进程）
     parallel_rosbag_workers: int = 2  # 并行读取的 worker 数量（建议 2）
+    on_existing_batch: str = "overwrite"  # 已存在 batch 目录处理策略: error|skip|overwrite
 
     # Image resize settings
     resize: ResizeConfig = None
@@ -291,6 +292,13 @@ def load_config_from_json(config_path: str) -> Config:
     if which_arm not in ["left", "right", "both"]:
         raise ValueError(
             f"Invalid which_arm: {which_arm}, must be 'left', 'right', or 'both'"
+        )
+
+    on_existing_batch = config_dict.get("on_existing_batch", "overwrite")
+    if on_existing_batch not in ["error", "skip", "overwrite"]:
+        raise ValueError(
+            "Invalid on_existing_batch: "
+            f"{on_existing_batch}, must be 'error', 'skip', or 'overwrite'"
         )
 
     # Create ResizeConfig object
@@ -477,6 +485,7 @@ def load_config_from_json(config_path: str) -> Config:
         video_process_timeout_sec=config_dict.get("video_process_timeout_sec", 600),
         use_parallel_rosbag_read=config_dict.get("use_parallel_rosbag_read", False),
         parallel_rosbag_workers=config_dict.get("parallel_rosbag_workers", 2),
+        on_existing_batch=on_existing_batch,
         robot_model=config_dict.get("robot_model", profile_model),
         urdf_path=config_dict.get("urdf_path", profile_urdf),
         main_timeline_key=main_timeline_key,

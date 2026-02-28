@@ -232,6 +232,7 @@ bash run.sh
 - `main_timeline.frequency`：主时间线频率（常见 30）。
 - `train_frequency`：最终训练帧率。
 - `only_arm` / `which_arm`：上肢/左右臂输出控制。
+- `on_existing_batch`：batch 目录已存在时策略，支持 `error` / `skip` / `overwrite`（默认 `overwrite`）。
 - `bag_overrides`：按 bag 名匹配覆盖配置。
 - `model_profiles`：按型号覆盖配置。
 

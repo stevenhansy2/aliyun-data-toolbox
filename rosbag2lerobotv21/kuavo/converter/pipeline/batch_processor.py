@@ -4,6 +4,7 @@ import gc
 import json
 import logging
 import os
+import shutil
 import time
 
 import numpy as np
@@ -442,7 +443,19 @@ def populate_dataset_stream(
 
             # 为该批创建独立数据集 root: {base_root}/batch_{id}
             batch_root = os.path.join(base_root, f"batch_{batch_id:04d}")
-            # os.makedirs(batch_root, exist_ok=True)
+            on_existing_batch = getattr(raw_config, "on_existing_batch", "overwrite")
+            if os.path.exists(batch_root):
+                if on_existing_batch == "overwrite":
+                    logger.warning("[STREAM] 批次目录已存在，覆盖: %s", batch_root)
+                    shutil.rmtree(batch_root)
+                elif on_existing_batch == "skip":
+                    logger.warning("[STREAM] 批次目录已存在，跳过: %s", batch_root)
+                    _t_prev_batch_end = time.time()
+                    continue
+                else:
+                    raise FileExistsError(
+                        f"批次目录已存在: {batch_root} (on_existing_batch={on_existing_batch})"
+                    )
             use_leju_claw_batch = (
                 use_leju_claw
                 and claw_state is not None
