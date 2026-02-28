@@ -56,7 +56,8 @@ RUN /bin/bash -c "source /opt/conda/etc/profile.d/conda.sh && \
     pip install matplotlib -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install pympler -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install rich==14.1.0 -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install hydra-core==1.3.2 -i https://pypi.tuna.tsinghua.edu.cn/simple "
+    pip install hydra-core==1.3.2 -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install datasets pyarrow pandas -i https://pypi.tuna.tsinghua.edu.cn/simple"
 
 # 安装 cocli
 RUN curl -fL https://download.coscene.cn/cocli/install.sh | sh -s -- v1.3.0-rc3

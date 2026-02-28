@@ -1,0 +1,3 @@
+- rosbag.rosbag_dir=/home/zhangyutao/Documents/Work/Code/Contest/test_bags/inputs/02
+- rosbag.lerobot_dir=/home/zhangyutao/Documents/Work/Code/Contest/test_bags/outputs/export/lerobot
+- rosbag.metadata_json=/home/zhangyutao/Documents/Work/Code/Contest/test_bags/inputs/02/metadata.json

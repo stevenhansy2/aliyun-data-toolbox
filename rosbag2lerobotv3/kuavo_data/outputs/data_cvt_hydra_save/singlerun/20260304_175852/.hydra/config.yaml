@@ -1,0 +1,26 @@
+rosbag:
+  rosbag_dir: /home/zhangyutao/Documents/Work/Code/Contest/test_bags/inputs/02
+  metadata_json: /home/zhangyutao/Documents/Work/Code/Contest/test_bags/inputs/02/metadata.json
+  num_used: null
+  lerobot_dir: /home/zhangyutao/Documents/Work/Code/Contest/test_bags/outputs/export/lerobot
+  chunk_size: 800
+dataset:
+  only_arm: true
+  eef_type: leju_claw
+  which_arm: both
+  use_depth: false
+  depth_range:
+  - 0
+  - 1500
+  task_description: Pick and Place
+  train_hz: 10
+  main_timeline: head_cam_h
+  main_timeline_fps: 30
+  sample_drop: 10
+  dex_dof_needed: 1
+  is_binary: false
+  delta_action: false
+  relative_start: false
+  resize:
+    width: 848
+    height: 480
