@@ -69,6 +69,7 @@ from converter.reader.timeline_prescan import (
 )
 from converter.reader.streaming_pipeline import (
     compute_eef_poses_with_cached_calculator,
+    detect_static_by_sliding_2s,
     prescan_and_prepare_batches,
     process_rosbag as process_rosbag_streaming,
     process_rosbag_parallel as process_rosbag_parallel_impl,
@@ -375,7 +376,7 @@ class KuavoRosbagReader:
         end_time: float = 1,
         action_config=None,
         chunk_size: int = 200,
-        num_workers: int = 2,
+        num_workers: int = 0,
     ):
         yield from process_rosbag_parallel_impl(
             self,
@@ -403,6 +404,13 @@ class KuavoRosbagReader:
                 result[key]["fallback_topic"] = info["fallback_topic"]
                 result[key]["fallback_fn_name"] = info["fallback_fn"].__name__
         return result
+
+    def _detect_static_by_sliding_2s(self, timestamps, joint_values, **kwargs):
+        return detect_static_by_sliding_2s(
+            timestamps,
+            joint_values,
+            **kwargs,
+        )
 
     def find_closest_indices_vectorized(self, timestamps, target_timestamps):
         """向量化查找最近时间戳索引"""

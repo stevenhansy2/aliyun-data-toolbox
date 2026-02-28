@@ -16,6 +16,7 @@ from converter.pipeline.batch_finalizer import (
     save_batch_metadata_json,
     save_first_batch_parameters,
 )
+from converter.media.schedule import resolve_runtime_parallelism
 from converter.reader.reader_entry import KuavoRosbagReader
 from converter.reader.postprocess_utils import PostProcessorUtils
 from converter.data.bag_discovery import get_bag_time_info
@@ -106,7 +107,9 @@ def populate_dataset_stream(
 
         # 选择串行或并行读取
         use_parallel = getattr(raw_config, "use_parallel_rosbag_read", False)
-        num_workers = getattr(raw_config, "parallel_rosbag_workers", 2)
+        num_workers = getattr(raw_config, "parallel_rosbag_workers", 0)
+        if num_workers <= 0:
+            num_workers = resolve_runtime_parallelism(raw_config).parallel_rosbag_workers
 
         if use_parallel:
             logger.info("[STREAM] 启用并行 ROSbag 读取 (%s workers)", num_workers)

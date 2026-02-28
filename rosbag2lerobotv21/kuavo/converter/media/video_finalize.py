@@ -5,6 +5,7 @@ import os
 
 from converter.configs import Config
 from converter.media.schedule import (
+    resolve_runtime_parallelism,
     resolve_video_process_timeout_sec,
     resolve_video_schedule,
 )
@@ -64,6 +65,7 @@ def encode_complete_videos_from_temp(
     print("[VIDEO] ========== 开始合成完整视频 ==========")
     process_timeout_sec = resolve_video_process_timeout_sec(raw_config)
     schedule = resolve_video_schedule(raw_config)
+    parallelism = resolve_runtime_parallelism(raw_config)
     max_parallel = max(1, schedule.max_encode_processes)
     print(
         f"[VIDEO] 调度配置: cores={schedule.cores}, max_encode_processes={max_parallel}, "
@@ -88,7 +90,16 @@ def encode_complete_videos_from_temp(
                 color_out_dir, f"observation.images.{camera}", "episode_000000.mp4"
             )
             os.makedirs(os.path.dirname(video_path), exist_ok=True)
-            color_jobs.append((camera_dir, camera, video_path, raw_config.train_hz, stats_output_dir))
+            color_jobs.append(
+                (
+                    camera_dir,
+                    camera,
+                    video_path,
+                    raw_config.train_hz,
+                    stats_output_dir,
+                    parallelism.codec_threads,
+                )
+            )
 
     # === 深度：每相机一个子进程（受 use_depth 控制） ===
     depth_temp_dir = os.path.join(temp_base_dir, "depth")
@@ -103,7 +114,16 @@ def encode_complete_videos_from_temp(
             if not os.path.isdir(camera_dir):
                 continue
             video_path = os.path.join(depth_out_dir, f"{camera}.mkv")
-            depth_jobs.append((camera_dir, camera, video_path, raw_config.train_hz, apply_denoise))
+            depth_jobs.append(
+                (
+                    camera_dir,
+                    camera,
+                    video_path,
+                    raw_config.train_hz,
+                    apply_denoise,
+                    parallelism.ffmpeg_threads,
+                )
+            )
     elif not use_depth and os.path.exists(depth_temp_dir):
         shutil.rmtree(depth_temp_dir, ignore_errors=True)
         print("[VIDEO] 跳过深度视频处理（use_depth=false），已清理深度临时目录")

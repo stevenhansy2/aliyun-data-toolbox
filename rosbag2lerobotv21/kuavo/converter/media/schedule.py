@@ -1,7 +1,20 @@
-"""Video scheduling helpers shared by lerobot conversion pipeline."""
+"""Shared concurrency scheduling helpers for the conversion pipeline."""
 
 from dataclasses import dataclass
 import os
+
+
+@dataclass(frozen=True)
+class RuntimeParallelism:
+    cores: int
+    pipeline_workers: int
+    max_encode_processes: int
+    queue_limit: int
+    parallel_rosbag_workers: int
+    image_writer_processes: int
+    image_writer_threads: int
+    codec_threads: int
+    ffmpeg_threads: int
 
 
 @dataclass(frozen=True)
@@ -12,54 +25,60 @@ class VideoSchedule:
     queue_limit: int
 
 
-_SCHEDULES = {
-    1: VideoSchedule(
-        cores=1, pipeline_workers=1, max_encode_processes=1, queue_limit=96
-    ),
-    2: VideoSchedule(
-        cores=2, pipeline_workers=2, max_encode_processes=1, queue_limit=160
-    ),
-    4: VideoSchedule(
-        cores=4, pipeline_workers=4, max_encode_processes=2, queue_limit=260
-    ),
-    8: VideoSchedule(
-        cores=8, pipeline_workers=6, max_encode_processes=3, queue_limit=400
-    ),
-}
-
-
-def _pick_bucket(cores: int) -> int:
-    if cores >= 8:
-        return 8
-    if cores >= 4:
-        return 4
-    if cores >= 2:
-        return 2
-    return 1
-
-
-def resolve_video_schedule(raw_config=None, queue_limit_override: int | None = None) -> VideoSchedule:
-    """
-    Resolve schedule from:
-    1) KUAVO_SCHED_CORES env
-    2) config.schedule_cores
-    3) host cpu count
-    """
-    cfg_cores = int(getattr(raw_config, "schedule_cores", 0) or 0) if raw_config is not None else 0
+def resolve_assigned_cores(raw_config=None) -> int:
+    """Resolve the CPU cores assigned to this job."""
+    cfg_cores = (
+        int(getattr(raw_config, "schedule_cores", 0) or 0)
+        if raw_config is not None
+        else 0
+    )
     env_cores = int(os.getenv("KUAVO_SCHED_CORES", "0") or 0)
-    req = env_cores if env_cores > 0 else cfg_cores
+    cores = env_cores if env_cores > 0 else cfg_cores
+    if cores <= 0:
+        cores = os.cpu_count() or 1
+    return max(1, cores)
 
-    if req <= 0:
-        req = os.cpu_count() or 1
-    bucket = _pick_bucket(req)
-    base = _SCHEDULES[bucket]
-    if queue_limit_override is None:
-        return base
+
+def _split_image_writer_workers(cores: int) -> tuple[int, int]:
+    """
+    Keep total image writer concurrency roughly bounded by assigned cores.
+    """
+    processes = min(max(1, cores), 4)
+    threads = max(1, cores // processes)
+    return processes, threads
+
+
+def resolve_runtime_parallelism(raw_config=None) -> RuntimeParallelism:
+    cores = resolve_assigned_cores(raw_config)
+    image_writer_processes, image_writer_threads = _split_image_writer_workers(cores)
+
+    return RuntimeParallelism(
+        cores=cores,
+        pipeline_workers=cores,
+        max_encode_processes=cores,
+        queue_limit=max(96, cores * 80),
+        parallel_rosbag_workers=cores,
+        image_writer_processes=image_writer_processes,
+        image_writer_threads=image_writer_threads,
+        codec_threads=1,
+        ffmpeg_threads=1,
+    )
+
+
+def resolve_video_schedule(
+    raw_config=None, queue_limit_override: int | None = None
+) -> VideoSchedule:
+    parallelism = resolve_runtime_parallelism(raw_config)
+    queue_limit = (
+        parallelism.queue_limit
+        if queue_limit_override is None
+        else queue_limit_override
+    )
     return VideoSchedule(
-        cores=base.cores,
-        pipeline_workers=base.pipeline_workers,
-        max_encode_processes=base.max_encode_processes,
-        queue_limit=queue_limit_override,
+        cores=parallelism.cores,
+        pipeline_workers=parallelism.pipeline_workers,
+        max_encode_processes=parallelism.max_encode_processes,
+        queue_limit=queue_limit,
     )
 
 
@@ -70,5 +89,9 @@ def resolve_video_process_timeout_sec(raw_config=None) -> int:
             return max(1, int(env_val))
         except Exception:
             pass
-    cfg_val = int(getattr(raw_config, "video_process_timeout_sec", 600) or 600) if raw_config is not None else 600
+    cfg_val = (
+        int(getattr(raw_config, "video_process_timeout_sec", 600) or 600)
+        if raw_config is not None
+        else 600
+    )
     return max(1, cfg_val)

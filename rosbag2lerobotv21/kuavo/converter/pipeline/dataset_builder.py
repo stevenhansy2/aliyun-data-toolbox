@@ -11,14 +11,15 @@ from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from converter.configs import Config
+from converter.media.schedule import resolve_runtime_parallelism
 
 
 @dataclasses.dataclass(frozen=True)
 class DatasetConfig:
     use_videos: bool = True
     tolerance_s: float = 0.0001
-    image_writer_processes: int = 6
-    image_writer_threads: int = 12
+    image_writer_processes: int = 0
+    image_writer_threads: int = 0
     video_backend: str | None = None
 
 
@@ -37,6 +38,15 @@ def create_empty_dataset(
 ) -> LeRobotDataset:
     if dataset_config is None:
         dataset_config = DatasetConfig()
+    parallelism = resolve_runtime_parallelism(raw_config)
+    image_writer_processes = (
+        dataset_config.image_writer_processes
+        or parallelism.image_writer_processes
+    )
+    image_writer_threads = (
+        dataset_config.image_writer_threads
+        or parallelism.image_writer_threads
+    )
 
     dexhand = [
         "left_linkerhand_1",
@@ -231,9 +241,8 @@ def create_empty_dataset(
         features=features,
         use_videos=dataset_config.use_videos,
         tolerance_s=dataset_config.tolerance_s,
-        image_writer_processes=dataset_config.image_writer_processes,
-        image_writer_threads=dataset_config.image_writer_threads,
+        image_writer_processes=image_writer_processes,
+        image_writer_threads=image_writer_threads,
         video_backend=dataset_config.video_backend,
         root=root,
     )
-

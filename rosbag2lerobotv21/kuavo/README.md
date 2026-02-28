@@ -216,8 +216,8 @@ bash run.sh
 常用环境变量：
 - `INPUT_DIR` / `OUTPUT_DIR`
 - `LOG_LEVEL=INFO|DEBUG`
-- `USE_PARALLEL_ROSBAG_READ=true|false`
-- `PARALLEL_ROSBAG_WORKERS=2`
+- `USE_PARALLEL_ROSBAG_READ=true|false`（默认 `true`）
+- `PARALLEL_ROSBAG_WORKERS=<按分配核数设置，或留空自动>`
 - `USE_STREAMING_VIDEO=true|false`
 - `USE_PIPELINE_ENCODING=true|false`
 
@@ -302,7 +302,7 @@ bash run.sh
 - 优先开启流式处理，避免一次性持有整包数据。
 - 大数据量场景开启并行读包：
   - `USE_PARALLEL_ROSBAG_READ=true`
-  - `PARALLEL_ROSBAG_WORKERS=2`（先从 2 开始）
+  - `PARALLEL_ROSBAG_WORKERS=<按分配核数设置，或留空自动>`
 - 视频策略建议：
   - 机器内存紧张：优先 `USE_STREAMING_VIDEO=true`
   - CPU 较强可尝试 `USE_PIPELINE_ENCODING=true`

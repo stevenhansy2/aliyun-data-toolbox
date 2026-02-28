@@ -9,8 +9,12 @@ import tempfile
 import cv2
 import numpy as np
 from converter.configs import Config
-from converter.media.schedule import resolve_video_schedule
+from converter.media.schedule import resolve_runtime_parallelism, resolve_video_schedule
 from converter.image.depth_conversion import process_depth_image_optimized
+
+
+def _ffmpeg_threads(raw_config: Config | None) -> str:
+    return str(resolve_runtime_parallelism(raw_config).ffmpeg_threads)
 
 def save_one_color_video_ffmpeg(cam_name, imgs, output_dir, raw_config):
     temp_img_dir = os.path.join(output_dir, f"temp_img_{cam_name}")
@@ -34,6 +38,8 @@ def save_one_color_video_ffmpeg(cam_name, imgs, output_dir, raw_config):
     ffmpeg_cmd = [
         "ffmpeg",
         "-y",
+        "-threads",
+        _ffmpeg_threads(raw_config),
         "-framerate",
         "30",
         "-i",
@@ -82,6 +88,8 @@ def save_one_depth_video_ffmpeg(cam_name, imgs, output_dir, raw_config):
     ffmpeg_cmd = [
         "ffmpeg",
         "-y",
+        "-threads",
+        _ffmpeg_threads(raw_config),
         "-framerate",
         "30",
         "-i",
@@ -241,6 +249,8 @@ def save_one_depth_video_16U(cam_name, imgs, output_dir, raw_config):
     ffmpeg_cmd = [
         "ffmpeg",
         "-y",
+        "-threads",
+        _ffmpeg_threads(raw_config),
         "-framerate",
         "30",
         "-i",
@@ -569,6 +579,8 @@ def save_depth_videos_enhanced_parallel(
             ffmpeg_cmd = [
                 "ffmpeg",
                 "-y",
+                "-threads",
+                _ffmpeg_threads(raw_config),
                 "-framerate",
                 "30",
                 "-i",

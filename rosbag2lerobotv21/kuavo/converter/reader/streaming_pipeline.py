@@ -10,6 +10,65 @@ import numpy as np
 import rosbag
 
 
+def detect_static_by_sliding_2s(
+    timestamps: np.ndarray,
+    joint_values: np.ndarray,
+    *,
+    start: float,
+    end: float,
+    head_span_sec: float = 10.0,
+    tail_span_sec: float = 10.0,
+    win_sec: float = 2.0,
+    step_sec: float = 1.0,
+    tol_diff: float = 0.1,
+):
+    """
+    Detect approximately static head/tail segments using sliding windows.
+
+    A window is considered static when the max absolute joint excursion inside
+    the window is below ``tol_diff``.
+    """
+    if timestamps.size == 0 or joint_values.size == 0:
+        return None, None
+
+    timestamps = np.asarray(timestamps, dtype=np.float64)
+    joint_values = np.asarray(joint_values, dtype=np.float64)
+    if joint_values.ndim != 2 or len(timestamps) != len(joint_values):
+        return None, None
+
+    def _window_is_static(mask: np.ndarray) -> bool:
+        if mask.sum() < 2:
+            return False
+        window_vals = joint_values[mask]
+        max_excursion = np.max(window_vals, axis=0) - np.min(window_vals, axis=0)
+        return bool(np.max(max_excursion) <= tol_diff)
+
+    head_limit = min(end, start + max(0.0, head_span_sec))
+    tail_limit = max(start, end - max(0.0, tail_span_sec))
+
+    head_static_end = None
+    probe = start
+    while probe + win_sec <= head_limit + 1e-9:
+        mask = (timestamps >= probe) & (timestamps <= probe + win_sec)
+        if _window_is_static(mask):
+            head_static_end = probe + win_sec
+            probe += step_sec
+            continue
+        break
+
+    tail_static_start = None
+    probe = end - win_sec
+    while probe >= tail_limit - 1e-9:
+        mask = (timestamps >= probe) & (timestamps <= probe + win_sec)
+        if _window_is_static(mask):
+            tail_static_start = probe
+            probe -= step_sec
+            continue
+        break
+
+    return head_static_end, tail_static_start
+
+
 def compute_eef_poses_with_cached_calculator(self, pose_calculator, joint_q_list):
     """使用缓存的计算器计算末端执行器位姿"""
     positions = []
@@ -377,13 +436,14 @@ def process_rosbag_parallel(
     end_time: float = 1,
     action_config=None,
     chunk_size: int = 200,
-    num_workers: int = 2,
+    num_workers: int = 0,
     *,
     parallel_worker_fn,
 ):
     """并行读取 ROSbag 文件，使用多进程分段读取。"""
     from multiprocessing import Process, Queue
 
+    num_workers = max(1, num_workers)
     print(f"[PARALLEL] ========== 启动 {num_workers} 进程并行读取 ==========")
     _t_start = _time.time()
 
@@ -492,4 +552,3 @@ def process_rosbag_parallel(
     print(f"[PARALLEL] 总耗时: {_t_total:.2f}s, 读取阶段: {_t_read:.2f}s")
     print(f"[PARALLEL] 产出 {batches_yielded} 个 batch")
     gc.collect()
-

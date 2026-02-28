@@ -34,18 +34,28 @@ def save_image_bytes_to_temp(
 
 
 def _encode_color_camera_worker(
-    camera_dir: str, camera: str, out_path: str, train_hz: int, stats_output_dir: str
+    camera_dir: str,
+    camera: str,
+    out_path: str,
+    train_hz: int,
+    stats_output_dir: str,
+    codec_threads: int = 1,
 ):
     return _encode_color_camera_worker_impl(
-        camera_dir, camera, out_path, train_hz, stats_output_dir
+        camera_dir, camera, out_path, train_hz, stats_output_dir, codec_threads
     )
 
 
 def _encode_depth_camera_worker(
-    camera_dir: str, camera: str, out_path: str, train_hz: int, apply_denoise: bool
+    camera_dir: str,
+    camera: str,
+    out_path: str,
+    train_hz: int,
+    apply_denoise: bool,
+    ffmpeg_threads: int = 1,
 ):
     return _encode_depth_camera_worker_impl(
-        camera_dir, camera, out_path, train_hz, apply_denoise
+        camera_dir, camera, out_path, train_hz, apply_denoise, ffmpeg_threads
     )
 
 
@@ -483,7 +493,7 @@ class BatchSegmentEncoder:
         train_hz: int,
         uuid_str: str,
         chunk_size: int = 800,
-        max_workers: int = 3,
+        max_workers: int = 1,
     ):
         """
         Args:
@@ -699,4 +709,3 @@ def encode_complete_videos_from_temp(
     return encode_complete_videos_from_temp_impl(
         temp_base_dir, output_dir, episode_uuid, raw_config, use_depth
     )
-

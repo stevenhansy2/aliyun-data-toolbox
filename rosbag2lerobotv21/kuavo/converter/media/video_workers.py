@@ -84,7 +84,12 @@ def save_image_bytes_to_temp(
 
 
 def _encode_color_camera_worker(
-    camera_dir: str, camera: str, out_path: str, train_hz: int, stats_output_dir: str
+    camera_dir: str,
+    camera: str,
+    out_path: str,
+    train_hz: int,
+    stats_output_dir: str,
+    codec_threads: int = 1,
 ):
     """
     子进程：编码彩色视频（PyAV）
@@ -107,7 +112,7 @@ def _encode_color_camera_worker(
         video_options = {
             "g": "2",
             "crf": "30",
-            "svtav1-params": "threads=6:lp=4",
+            "threads": str(max(1, codec_threads)),
         }
         first_img = Image.open(frame_files[0])
         width, height = first_img.size
@@ -137,7 +142,12 @@ def _encode_color_camera_worker(
 
 
 def _encode_depth_camera_worker(
-    camera_dir: str, camera: str, out_path: str, train_hz: int, apply_denoise: bool
+    camera_dir: str,
+    camera: str,
+    out_path: str,
+    train_hz: int,
+    apply_denoise: bool,
+    ffmpeg_threads: int = 1,
 ):
     """
     子进程：编码深度视频（ffmpeg + 可选去噪）
@@ -193,6 +203,8 @@ def _encode_depth_camera_worker(
             cmd = [
                 "ffmpeg",
                 "-y",
+                "-threads",
+                str(max(1, ffmpeg_threads)),
                 "-framerate",
                 str(train_hz),
                 "-i",
@@ -219,5 +231,4 @@ def _encode_depth_camera_worker(
 
 
 # ==================== 流式视频编码器 ====================
-
 

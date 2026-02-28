@@ -38,7 +38,11 @@ from converter.media.video_orchestrator import (
     _encode_depth_camera_worker,
     encode_complete_videos_from_temp,
 )
-from converter.media.schedule import resolve_video_process_timeout_sec, resolve_video_schedule
+from converter.media.schedule import (
+    resolve_runtime_parallelism,
+    resolve_video_process_timeout_sec,
+    resolve_video_schedule,
+)
 from converter.media.video_finalize import _join_with_timeout_or_raise
 
 logger = logging.getLogger(__name__)
@@ -235,7 +239,14 @@ def port_kuavo_rosbag(
             + DEFAULT_DEXHAND_JOINT_NAMES[6:12]
         )
 
-    dataset_config = DatasetConfig()
+    parallelism = resolve_runtime_parallelism(raw_config)
+    if getattr(config, "parallel_rosbag_workers", 0) <= 0:
+        config.parallel_rosbag_workers = parallelism.parallel_rosbag_workers
+
+    dataset_config = DatasetConfig(
+        image_writer_processes=parallelism.image_writer_processes,
+        image_writer_threads=parallelism.image_writer_threads,
+    )
 
 
     # 如果启用流水线编码，创建编码器
@@ -252,8 +263,12 @@ def port_kuavo_rosbag(
 
     schedule = resolve_video_schedule(raw_config)
     logger.info(
-        "[SCHEDULE] 视频调度: cores=%s pipeline_workers=%s encode_processes=%s queue_limit=%s",
+        "[SCHEDULE] 并发调度: cores=%s rosbag_workers=%s image_writer=%sx%s "
+        "pipeline_workers=%s encode_processes=%s queue_limit=%s",
         schedule.cores,
+        config.parallel_rosbag_workers,
+        parallelism.image_writer_processes,
+        parallelism.image_writer_threads,
         schedule.pipeline_workers,
         schedule.max_encode_processes,
         schedule.queue_limit,
@@ -293,7 +308,9 @@ def port_kuavo_rosbag(
             pipeline_encoder = None
 
         video_output_dir = base_root
-        default_queue_limit = getattr(raw_config, "video_queue_limit", schedule.queue_limit)
+        default_queue_limit = (
+            getattr(raw_config, "video_queue_limit", 0) or schedule.queue_limit
+        )
         queue_limit = int(os.environ.get("VIDEO_QUEUE_LIMIT", default_queue_limit))
 
         streaming_encoder = StreamingVideoEncoderManager(
@@ -436,6 +453,7 @@ def port_kuavo_rosbag(
                                 video_path,
                                 raw_config.train_hz,
                                 apply_denoise,
+                                parallelism.ffmpeg_threads,
                             ),
                             daemon=False,
                         )
