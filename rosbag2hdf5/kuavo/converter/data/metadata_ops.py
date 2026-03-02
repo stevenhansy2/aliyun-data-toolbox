@@ -228,14 +228,25 @@ def merge_metadata_and_moment(
     with open(metadata_path, "r", encoding="utf-8") as f:
         raw_metadata = json.load(f)
 
+    is_new_format = "marks" in raw_metadata and isinstance(raw_metadata.get("marks"), list)
+
     # 验证 metadata.json 关键字段是否存在且非空
-    required_metadata_fields = {
-        "sceneCode": "场景编码",
-        "subSceneCode": "子场景编码",
-        "initSceneText": "子场景中文描述",
-        "englishInitSceneText": "子场景英文描述",
-        "deviceSn": "设备序列号",
-    }
+    if is_new_format:
+        required_metadata_fields = {
+            "primaryScene": "一级场景名称",
+            "tertiaryScene": "三级场景名称",
+            "initSceneText": "子场景中文描述",
+            "englishInitSceneText": "子场景英文描述",
+            "deviceSn": "设备序列号",
+        }
+    else:
+        required_metadata_fields = {
+            "sceneCode": "场景编码",
+            "subSceneCode": "子场景编码",
+            "initSceneText": "子场景中文描述",
+            "englishInitSceneText": "子场景英文描述",
+            "deviceSn": "设备序列号",
+        }
 
     for field, desc in required_metadata_fields.items():
         value = raw_metadata.get(field)
@@ -294,22 +305,21 @@ def merge_metadata_and_moment(
                 log_print(f"[ERROR] {error_msg}")
                 raise ValueError(error_msg)
 
-    # 转换新格式 metadata 为旧格式
+    # 转换 metadata 为统一格式
     converted_metadata = {}
 
-    # scene_name 对应 scene_code
-    converted_metadata["scene_name"] = raw_metadata.get("sceneCode")
+    if is_new_format:
+        converted_metadata["scene_name"] = raw_metadata.get("primaryScene")
+        converted_metadata["sub_scene_name"] = raw_metadata.get("tertiaryScene")
+    else:
+        converted_metadata["scene_name"] = raw_metadata.get("sceneCode")
+        converted_metadata["sub_scene_name"] = raw_metadata.get("subSceneCode")
 
-    # sub_scene_name 对应 sub_scene_code
-    converted_metadata["sub_scene_name"] = raw_metadata.get("subSceneCode")
-
-    # init_scene_text 对应 sub_scene_zh_dec
+    # init_scene_text 对应场景中文描述
     converted_metadata["init_scene_text"] = raw_metadata.get("initSceneText")
 
-    # english_init_scene_text 对应 sub_scene_en_dec
-    converted_metadata["english_init_scene_text"] = raw_metadata.get(
-        "englishInitSceneText"
-    )
+    # english_init_scene_text 对应场景英文描述
+    converted_metadata["english_init_scene_text"] = raw_metadata.get("englishInitSceneText")
 
     # task_name 优先 task_group_name 其次 task_name
     if task_group_name:
