@@ -305,9 +305,9 @@ def load_raw_episode_data(
         "head_timestamps": main_time_line_timestamps_ns_head,
         "action": {
             "effector": {
-                "position": control_robot_hand_position_both if control_robot_hand_position_both is not None else leju_claw_command__position,
+                "position": control_robot_hand_position_both if (control_robot_hand_position_both is not None and control_robot_hand_position_both.size > 0) else leju_claw_command__position,
                 # "index": main_time_line_timestamps_ns,
-                "names": ["l_thumbMCP", "l_thumbCMC", "l_indexMCP", "l_middleMCP", "l_ringMCP", "l_littleMCP", "r_thumbMCP", "r_thumbCMC", "r_indexMCP", "r_middleMCP", "r_ringMCP", "r_littleMCP"] if control_robot_hand_position_both is not None else ["right_outer_finger", "left_outer_finger"],
+                "names": ["l_thumbMCP", "l_thumbCMC", "l_indexMCP", "l_middleMCP", "l_ringMCP", "l_littleMCP", "r_thumbMCP", "r_thumbCMC", "r_indexMCP", "r_middleMCP", "r_ringMCP", "r_littleMCP"] if (control_robot_hand_position_both is not None and control_robot_hand_position_both.size > 0) else ["right_outer_finger", "left_outer_finger"],
             },
             "joint": {
                 "position": kuavo_arm_traj__position,
@@ -329,7 +329,7 @@ def load_raw_episode_data(
                 "effort": head_effort,
                 "position": sensors_data_raw__joint_q[:, 26:28],
                 "velocity": sensors_data_raw__joint_v[:, 26:28],
-                "naems": ["zhead_1_joint", "zhead_2_joint"],
+                "names": ["zhead_1_joint", "zhead_2_joint"],
             },
             "joint": {
                 "current_value": joint_current,
@@ -558,7 +558,7 @@ def load_raw_episode_data(
                     "effort": sensors_data_raw__joint_effort_ori[:, 26:28] if sensors_data_raw__joint_effort_ori.size else np.array([]),
                     "position": sensors_data_raw__joint_q_ori[:, 26:28] if sensors_data_raw__joint_q_ori.size else np.array([]),
                     "velocity": sensors_data_raw__joint_v_ori[:, 26:28] if sensors_data_raw__joint_v_ori.size else np.array([]),
-                    "naems": ["zhead_1_joint", "zhead_2_joint"],
+                    "names": ["zhead_1_joint", "zhead_2_joint"],
                 },
                 "joint": {
                     "current_value": joint_current_ori,
