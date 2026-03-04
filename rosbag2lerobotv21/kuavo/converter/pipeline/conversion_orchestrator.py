@@ -471,7 +471,9 @@ def port_kuavo_rosbag(
         elif pipeline_encoder is not None:
             # 流水线模式：等待编码完成并拼接
             print("[VIDEO] ========== 流水线编码模式 ==========")
-            pipeline_encoder.finalize(use_depth=use_depth)
+            pipeline_ok = pipeline_encoder.finalize(use_depth=use_depth)
+            if not pipeline_ok:
+                raise RuntimeError("流水线视频编码失败：至少一个相机分段拼接失败")
             print(f"[VIDEO] 所有视频已保存到: {video_output_dir}")
 
         elif encoding_thread is not None:

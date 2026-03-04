@@ -292,6 +292,8 @@ def parallel_rosbag_worker(args: dict, result_queue, worker_id: int):
                     if batch is not None:
                         result_queue.put(
                             {
+                                "type": "batch",
+                                "worker_id": worker_id,
                                 "batch_idx": global_batch_idx,
                                 "data": batch,
                             }
@@ -314,6 +316,8 @@ def parallel_rosbag_worker(args: dict, result_queue, worker_id: int):
             if batch is not None:
                 result_queue.put(
                     {
+                        "type": "batch",
+                        "worker_id": worker_id,
                         "batch_idx": global_batch_idx,
                         "data": batch,
                     }
@@ -331,9 +335,16 @@ def parallel_rosbag_worker(args: dict, result_queue, worker_id: int):
         )
 
         # 发送完成信号
-        result_queue.put(None)
+        result_queue.put({"type": "done", "worker_id": worker_id})
 
     except Exception as e:
         print(f"[Worker {worker_id}] 错误: {e}")
         traceback.print_exc()
-        result_queue.put({"error": str(e), "traceback": traceback.format_exc()})
+        result_queue.put(
+            {
+                "type": "error",
+                "worker_id": worker_id,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+        )

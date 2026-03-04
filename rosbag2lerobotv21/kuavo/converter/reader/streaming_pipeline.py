@@ -353,49 +353,53 @@ def prescan_and_prepare_batches(
     abs_start = bag_start + start_time * bag_duration
     abs_end = bag_start + end_time * bag_duration
 
-    joint_q_topic = None
-    for k, info in self._topic_process_map.items():
-        if k == "observation.sensorsData.joint_q":
-            joint_q_topic = info["topic"]
-            break
-
-    if joint_q_topic is not None and abs_end > abs_start:
-        joint_ts, joint_vals = [], []
-        for _, msg, t in bag.read_messages(
-            topics=[joint_q_topic],
-            start_time=rospy.Time.from_sec(abs_start),
-            end_time=rospy.Time.from_sec(abs_end),
-        ):
-            try:
-                q = msg.joint_data.joint_q
-                if hasattr(q, "__len__") and len(q) == 28:
-                    joint_vals.append(np.array(q, dtype=np.float64))
-                    joint_ts.append(t.to_sec())
-            except Exception:
-                item = self._msg_processer.process_joint_q_state(msg)
-                if "data" in item and hasattr(item["data"], "__len__") and len(item["data"]) == 28:
-                    joint_vals.append(np.array(item["data"], dtype=np.float64))
-                    joint_ts.append(t.to_sec())
-
-        if joint_ts:
-            ts_arr = np.array(joint_ts, dtype=np.float64)
-            vals_arr = np.vstack(joint_vals)
-            head_static_end, tail_static_start = self._detect_static_by_sliding_2s(
-                ts_arr,
-                vals_arr,
-                start=abs_start,
-                end=abs_end,
-                head_span_sec=10.0,
-                tail_span_sec=10.0,
-                win_sec=2.0,
-                step_sec=1.0,
-                tol_diff=0.1,
-            )
-            if head_static_end is not None and head_static_end > abs_start:
-                abs_start = min(abs_end, head_static_end)
-            if tail_static_start is not None and tail_static_start < abs_end:
-                abs_end = max(abs_start, tail_static_start)
-        del joint_ts, joint_vals
+    # 暂时禁用基于 2 秒滑窗的头尾静止段裁剪。
+    # 该逻辑在短片段或 joint_q 变化较小时可能将有效时间窗裁空，
+    # 导致并行预扫描直接失败。当前保留原始标注时间窗继续处理。
+    #
+    # joint_q_topic = None
+    # for k, info in self._topic_process_map.items():
+    #     if k == "observation.sensorsData.joint_q":
+    #         joint_q_topic = info["topic"]
+    #         break
+    #
+    # if joint_q_topic is not None and abs_end > abs_start:
+    #     joint_ts, joint_vals = [], []
+    #     for _, msg, t in bag.read_messages(
+    #         topics=[joint_q_topic],
+    #         start_time=rospy.Time.from_sec(abs_start),
+    #         end_time=rospy.Time.from_sec(abs_end),
+    #     ):
+    #         try:
+    #             q = msg.joint_data.joint_q
+    #             if hasattr(q, "__len__") and len(q) == 28:
+    #                 joint_vals.append(np.array(q, dtype=np.float64))
+    #                 joint_ts.append(t.to_sec())
+    #         except Exception:
+    #             item = self._msg_processer.process_joint_q_state(msg)
+    #             if "data" in item and hasattr(item["data"], "__len__") and len(item["data"]) == 28:
+    #                 joint_vals.append(np.array(item["data"], dtype=np.float64))
+    #                 joint_ts.append(t.to_sec())
+    #
+    #     if joint_ts:
+    #         ts_arr = np.array(joint_ts, dtype=np.float64)
+    #         vals_arr = np.vstack(joint_vals)
+    #         head_static_end, tail_static_start = self._detect_static_by_sliding_2s(
+    #             ts_arr,
+    #             vals_arr,
+    #             start=abs_start,
+    #             end=abs_end,
+    #             head_span_sec=10.0,
+    #             tail_span_sec=10.0,
+    #             win_sec=2.0,
+    #             step_sec=1.0,
+    #             tol_diff=0.1,
+    #         )
+    #         if head_static_end is not None and head_static_end > abs_start:
+    #             abs_start = min(abs_end, head_static_end)
+    #         if tail_static_start is not None and tail_static_start < abs_end:
+    #             abs_end = max(abs_start, tail_static_start)
+    #     del joint_ts, joint_vals
 
     bag.close()
     del bag
@@ -466,7 +470,7 @@ def process_rosbag_parallel(
             worker_assignments.append((start_batch, end_batch))
     print(f"[PARALLEL] Worker 分配: {worker_assignments}")
 
-    result_queues = [Queue(maxsize=10) for _ in worker_assignments]
+    result_queue = Queue(maxsize=max(10, len(worker_assignments) * 2))
     workers = []
     for w_idx, (start_batch, end_batch) in enumerate(worker_assignments):
         first_timeline = batch_timelines[start_batch]
@@ -501,7 +505,7 @@ def process_rosbag_parallel(
             "topic_process_map": self._serialize_topic_process_map(),
             "config_dict": config_dict,
         }
-        p = Process(target=parallel_worker_fn, args=(worker_args, result_queues[w_idx], w_idx))
+        p = Process(target=parallel_worker_fn, args=(worker_args, result_queue, w_idx))
         p.start()
         workers.append(p)
         print(
@@ -509,24 +513,50 @@ def process_rosbag_parallel(
         )
 
     _t_read_start = _time.time()
-    current_worker = 0
     batches_yielded = 0
-    while current_worker < len(workers):
+    completed_workers = set()
+    pending_batches = {}
+    next_batch_idx = 0
+    failed_workers = set()
+
+    while len(completed_workers) < len(workers):
         try:
-            result = result_queues[current_worker].get(timeout=300)
+            result = result_queue.get(timeout=300)
             if result is None:
-                print(f"[PARALLEL] Worker {current_worker} 完成")
-                current_worker += 1
                 continue
-            if "error" in result:
-                print(f"[PARALLEL] Worker {current_worker} 错误: {result['error']}")
-                current_worker += 1
+
+            msg_type = result.get("type", "batch")
+            worker_id = result.get("worker_id")
+
+            if msg_type == "done":
+                if worker_id not in completed_workers:
+                    completed_workers.add(worker_id)
+                    print(f"[PARALLEL] Worker {worker_id} 完成")
                 continue
+
+            if msg_type == "error":
+                if worker_id not in failed_workers:
+                    failed_workers.add(worker_id)
+                    completed_workers.add(worker_id)
+                    print(f"[PARALLEL] Worker {worker_id} 错误: {result['error']}")
+                continue
+
             batch_idx = result["batch_idx"]
-            batch_data = result["data"]
-            batches_yielded += 1
-            print(f"[PARALLEL] 收到 Batch {batch_idx + 1} (已产出 {batches_yielded}/{num_batches})")
-            yield batch_data
+            pending_batches[batch_idx] = result["data"]
+            print(
+                f"[PARALLEL] 收到 Batch {batch_idx + 1} "
+                f"(待输出 {len(pending_batches)} 个, 已完成worker {len(completed_workers)}/{len(workers)})"
+            )
+
+            while next_batch_idx in pending_batches:
+                batch_data = pending_batches.pop(next_batch_idx)
+                batches_yielded += 1
+                print(
+                    f"[PARALLEL] 输出 Batch {next_batch_idx + 1} "
+                    f"(已产出 {batches_yielded}/{num_batches})"
+                )
+                yield batch_data
+                next_batch_idx += 1
         except Exception as e:
             print(f"[PARALLEL] 接收 Batch 出错: {e}")
             import traceback
@@ -539,12 +569,11 @@ def process_rosbag_parallel(
             print(f"[PARALLEL] Worker {w_idx} 超时，强制终止")
             p.terminate()
 
-    for q in result_queues:
-        while not q.empty():
-            try:
-                q.get_nowait()
-            except Exception:
-                pass
+    while not result_queue.empty():
+        try:
+            result_queue.get_nowait()
+        except Exception:
+            break
 
     _t_total = _time.time() - _t_start
     _t_read = _time.time() - _t_read_start

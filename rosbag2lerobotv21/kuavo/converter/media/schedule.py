@@ -1,7 +1,102 @@
 """Shared concurrency scheduling helpers for the conversion pipeline."""
 
 from dataclasses import dataclass
+import math
 import os
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _parse_cpu_set(cpu_set: str | None) -> int | None:
+    if not cpu_set:
+        return None
+
+    count = 0
+    for part in cpu_set.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            try:
+                start = int(start_str)
+                end = int(end_str)
+            except ValueError:
+                return None
+            if end < start:
+                return None
+            count += end - start + 1
+            continue
+        try:
+            int(part)
+        except ValueError:
+            return None
+        count += 1
+    return count or None
+
+
+def _detect_affinity_cores() -> int | None:
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return None
+
+
+def _detect_cgroup_quota_cores() -> int | None:
+    # cgroup v2
+    cpu_max = _read_text("/sys/fs/cgroup/cpu.max")
+    if cpu_max:
+        try:
+            quota_str, period_str = cpu_max.split()
+            if quota_str != "max":
+                quota = int(quota_str)
+                period = int(period_str)
+                if quota > 0 and period > 0:
+                    return max(1, math.ceil(quota / period))
+        except (ValueError, TypeError):
+            pass
+
+    # cgroup v1
+    quota_str = _read_text("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+    period_str = _read_text("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+    if quota_str and period_str:
+        try:
+            quota = int(quota_str)
+            period = int(period_str)
+            if quota > 0 and period > 0:
+                return max(1, math.ceil(quota / period))
+        except ValueError:
+            pass
+
+    return None
+
+
+def _detect_cpuset_cores() -> int | None:
+    for path in (
+        "/sys/fs/cgroup/cpuset.cpus.effective",
+        "/sys/fs/cgroup/cpuset/cpuset.cpus",
+        "/sys/fs/cgroup/cpuset.cpus",
+    ):
+        parsed = _parse_cpu_set(_read_text(path))
+        if parsed:
+            return parsed
+    return None
+
+
+def _detect_container_cpu_limit() -> int:
+    detected = [n for n in (
+        os.cpu_count(),
+        _detect_affinity_cores(),
+        _detect_cgroup_quota_cores(),
+        _detect_cpuset_cores(),
+    ) if n and n > 0]
+    return max(1, min(detected)) if detected else 1
 
 
 @dataclass(frozen=True)
@@ -35,7 +130,7 @@ def resolve_assigned_cores(raw_config=None) -> int:
     env_cores = int(os.getenv("KUAVO_SCHED_CORES", "0") or 0)
     cores = env_cores if env_cores > 0 else cfg_cores
     if cores <= 0:
-        cores = os.cpu_count() or 1
+        cores = _detect_container_cpu_limit()
     return max(1, cores)
 
 

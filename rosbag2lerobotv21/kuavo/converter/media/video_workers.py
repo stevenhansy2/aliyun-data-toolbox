@@ -135,6 +135,7 @@ def _encode_color_camera_worker(
         print(f"[VIDEO][COLOR] ✅ {camera} 完成: {out_path}")
     except Exception as e:
         print(f"[VIDEO][COLOR] ❌ {camera} 失败: {e}")
+        raise
     finally:
         shutil.rmtree(camera_dir, ignore_errors=True)
         gc.collect()
@@ -224,6 +225,7 @@ def _encode_depth_camera_worker(
             print(f"[VIDEO][DEPTH] ✅ {camera} 完成: {out_path}")
     except Exception as e:
         print(f"[VIDEO][DEPTH] ❌ {camera} 失败: {e}")
+        raise
     finally:
         shutil.rmtree(camera_dir, ignore_errors=True)
         gc.collect()
@@ -231,4 +233,3 @@ def _encode_depth_camera_worker(
 
 
 # ==================== 流式视频编码器 ====================
-
