@@ -141,7 +141,7 @@ def validate_episode_structure(root: Path) -> None:
     #print(f"[validate] ✅ 结构验证通过: {root}")
 
 
-def merge_meta(src_path, tgt_path, summary_output_dir=None):
+def merge_meta(src_path, tgt_path, generate_summary: bool = False):
     src_path = Path(src_path)
     if not src_path.exists():
         raise ValueError(f"源目录不存在: {src_path}")
@@ -155,11 +155,6 @@ def merge_meta(src_path, tgt_path, summary_output_dir=None):
     success_count = 0
     skipped_dirs = []
     merged_metadata = {}  # 用于合并 metadata.json
-
-    if summary_output_dir is None:
-        summary_output_dir = tgt_path
-    summary_output_dir = Path(summary_output_dir)
-    summary_output_dir.mkdir(parents=True, exist_ok=True)
 
     tgt_path = Path(tgt_path)
 
@@ -317,10 +312,11 @@ def merge_meta(src_path, tgt_path, summary_output_dir=None):
         "total_size_tb": round(total_size_tb, 4),
     }
 
-    summary_path = summary_output_dir / "dataset_summary.json"
-    with open(summary_path, 'w', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2, ensure_ascii=False)
-    #print(f"\n[merge_meta] ✅ 已生成数据集摘要: {summary_path}")
+    if generate_summary:
+        summary_path = tgt_path / "dataset_summary.json"
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=2, ensure_ascii=False)
+        #print(f"\n[merge_meta] ✅ 已生成数据集摘要: {summary_path}")
     #print(f"[merge_meta] 📊 成功合并 {success_count} / {len(srcs)} 个子目录")
     if skipped_dirs:
         #print("[merge_meta] ⚠️ 跳过的目录（前5个）:")
@@ -445,22 +441,15 @@ def main():
     parser = argparse.ArgumentParser(description="重组 testoutput 目录下的 LeRobot 数据集")
     parser.add_argument("--src_dir", type=str, required=True, help="待重组的源父目录（包含多个子数据集）")
     parser.add_argument("--tgt_dir", type=str, required=True, help="合并后的目标目录")
-    parser.add_argument("--summary_dir", type=str, default=None,
-                        help="统计 JSON 输出目录（默认为 tgt_dir）")
-    parser.add_argument("--save", action="store_true",
-                        help="是否保留 tgt_dir（若未指定，则合并后自动删除）")
+    parser.add_argument("--summary", action="store_true",
+                        help="是否生成 dataset_summary.json（输出到 tgt_dir）")
     parser.add_argument("--max_tar", default=2, type=int, help="最大重试打包次数（当前未使用）")
     args = parser.parse_args()
 
-    merge_meta(args.src_dir, args.tgt_dir, summary_output_dir=args.summary_dir)
+    merge_meta(args.src_dir, args.tgt_dir, generate_summary=args.summary)
 
     # 新增：自动分块
     reorganize_chunks(args.tgt_dir)
-
-    if not args.save:
-        if Path(args.tgt_dir).exists():
-            print(f"[cleanup] 删除临时合并目录: {args.tgt_dir}")
-            shutil.rmtree(args.tgt_dir)
 
 
 if __name__ == '__main__':

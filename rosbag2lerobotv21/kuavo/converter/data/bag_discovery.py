@@ -87,30 +87,51 @@ def _sanitize_dataset_name(name: str) -> str:
 
 
 def _resolve_sidecar_path(
-    override_path: str | None, bag_path: str, file_name: str, root_dir: str
+    override_path: str | None,
+    bag_path: str,
+    file_name: str,
+    root_dir: str,
+    alt_file_names: list[str] | None = None,
 ) -> str | None:
+    alt_file_names = alt_file_names or []
+    bag_parent = os.path.basename(os.path.dirname(bag_path))
+    bag_stem = os.path.splitext(os.path.basename(bag_path))[0]
+
+    names = [file_name, *alt_file_names]
+
+    def _find_existing(base_dir: str, include_scoped: bool) -> str | None:
+        candidates: list[str] = []
+        if include_scoped:
+            for name in names:
+                candidates.append(os.path.join(base_dir, bag_parent, name))
+                candidates.append(os.path.join(base_dir, bag_stem, name))
+        for name in names:
+            candidates.append(os.path.join(base_dir, name))
+
+        seen: set[str] = set()
+        for p in candidates:
+            if p in seen:
+                continue
+            seen.add(p)
+            if os.path.exists(p):
+                return p
+        return None
+
     if override_path:
         if os.path.isfile(override_path):
             return override_path
         if os.path.isdir(override_path):
-            bag_parent = os.path.basename(os.path.dirname(bag_path))
-            bag_stem = os.path.splitext(os.path.basename(bag_path))[0]
-            candidates = [
-                os.path.join(override_path, bag_parent, file_name),
-                os.path.join(override_path, bag_stem, file_name),
-                os.path.join(override_path, file_name),
-            ]
-            for p in candidates:
-                if os.path.exists(p):
-                    return p
+            matched = _find_existing(override_path, include_scoped=True)
+            if matched:
+                return matched
         return None
 
-    local = os.path.join(os.path.dirname(bag_path), file_name)
-    if os.path.exists(local):
-        return local
-    root_level = os.path.join(root_dir, file_name)
-    if os.path.exists(root_level):
-        return root_level
+    matched = _find_existing(os.path.dirname(bag_path), include_scoped=False)
+    if matched:
+        return matched
+    matched = _find_existing(root_dir, include_scoped=False)
+    if matched:
+        return matched
     return None
 
 
@@ -166,7 +187,11 @@ def discover_bag_tasks_auto(
                 "bag_name": bag_name,
                 "dataset_name": dataset_name,
                 "metadata_json_path": _resolve_sidecar_path(
-                    metadata_json_path, bag_path, "metadata.json", root_dir
+                    metadata_json_path,
+                    bag_path,
+                    "metadata.json",
+                    root_dir,
+                    alt_file_names=[f"{bag_name}.json"],
                 ),
                 "moment_json_path": _resolve_sidecar_path(
                     moment_json_path, bag_path, "moments.json", root_dir
