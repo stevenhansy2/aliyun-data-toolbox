@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import gc
 import json
 import os
@@ -18,6 +19,26 @@ from converter.media.depth_video_export import (
     save_depth_videos_enhanced_parallel,
 )
 from converter.media.video_orchestrator import save_image_bytes_to_temp
+
+
+_STORAGE_ERRNOS = {
+    getattr(errno, "ENOSPC", 28),
+    getattr(errno, "EDQUOT", 122),
+}
+
+
+def _is_storage_exhaustion_error(exc: BaseException) -> bool:
+    current = exc
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        err_no = getattr(current, "errno", None)
+        if err_no in _STORAGE_ERRNOS:
+            return True
+        if "Disk quota exceeded" in str(current):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def persist_batch_media(
@@ -160,3 +181,5 @@ def save_batch_metadata_json(
         import traceback
 
         traceback.print_exc()
+        if _is_storage_exhaustion_error(e):
+            raise

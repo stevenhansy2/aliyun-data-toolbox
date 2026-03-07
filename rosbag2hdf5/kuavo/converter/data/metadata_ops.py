@@ -236,7 +236,6 @@ def merge_metadata_and_moment(
             "primaryScene": "一级场景名称",
             "tertiaryScene": "三级场景名称",
             "initSceneText": "子场景中文描述",
-            "englishInitSceneText": "子场景英文描述",
             "deviceSn": "设备序列号",
         }
     else:
@@ -244,7 +243,6 @@ def merge_metadata_and_moment(
             "sceneCode": "场景编码",
             "subSceneCode": "子场景编码",
             "initSceneText": "子场景中文描述",
-            "englishInitSceneText": "子场景英文描述",
             "deviceSn": "设备序列号",
         }
 
@@ -318,8 +316,16 @@ def merge_metadata_and_moment(
     # init_scene_text 对应场景中文描述
     converted_metadata["init_scene_text"] = raw_metadata.get("initSceneText")
 
-    # english_init_scene_text 对应场景英文描述
-    converted_metadata["english_init_scene_text"] = raw_metadata.get("englishInitSceneText")
+    # english_init_scene_text 缺失时回退到中文描述，避免展示字段阻断主流程
+    english_init_scene_text = raw_metadata.get("englishInitSceneText")
+    if not english_init_scene_text or (
+        isinstance(english_init_scene_text, str) and english_init_scene_text.strip() == ""
+    ):
+        english_init_scene_text = raw_metadata.get("initSceneText")
+        log_print(
+            "[WARN] metadata.json 缺失 englishInitSceneText，回退使用 initSceneText"
+        )
+    converted_metadata["english_init_scene_text"] = english_init_scene_text
 
     # task_name 优先 task_group_name 其次 task_name
     if task_group_name:

@@ -4,10 +4,99 @@ from __future__ import annotations
 
 import gc
 import os
+import signal
 import time as _time
 
 import numpy as np
 import rosbag
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _format_bytes(num_bytes: int | float | None) -> str:
+    if num_bytes is None:
+        return "unknown"
+    value = float(num_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(value) < 1024.0 or unit == "TiB":
+            return f"{value:.1f}{unit}"
+        value /= 1024.0
+    return f"{value:.1f}TiB"
+
+
+def _get_cgroup_memory_snapshot() -> dict[str, float | int | None]:
+    usage = None
+    limit = None
+
+    usage_text = _read_text("/sys/fs/cgroup/memory.current") or _read_text(
+        "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+    )
+    if usage_text:
+        try:
+            usage = int(usage_text)
+        except ValueError:
+            usage = None
+
+    limit_text = _read_text("/sys/fs/cgroup/memory.max") or _read_text(
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+    )
+    if limit_text and limit_text != "max":
+        try:
+            limit = int(limit_text)
+        except ValueError:
+            limit = None
+
+    percent = None
+    if usage is not None and limit not in (None, 0):
+        percent = usage / limit
+
+    return {"usage": usage, "limit": limit, "percent": percent}
+
+
+def _get_process_rss_bytes() -> int | None:
+    try:
+        import psutil
+
+        return int(psutil.Process().memory_info().rss)
+    except Exception:
+        return None
+
+
+def _log_memory_snapshot(prefix: str):
+    rss = _get_process_rss_bytes()
+    cgroup = _get_cgroup_memory_snapshot()
+    msg = f"{prefix} rss={_format_bytes(rss)}"
+    if cgroup["usage"] is not None:
+        msg += f", cgroup_usage={_format_bytes(cgroup['usage'])}"
+    if cgroup["limit"] is not None:
+        msg += f", cgroup_limit={_format_bytes(cgroup['limit'])}"
+    if cgroup["percent"] is not None:
+        msg += f", usage_ratio={cgroup['percent'] * 100:.1f}%"
+    print(msg)
+
+
+def _describe_exitcode(exitcode: int | None) -> str:
+    if exitcode in (None, 0):
+        return "正常退出"
+    if exitcode < 0:
+        signum = -exitcode
+        try:
+            signame = signal.Signals(signum).name
+        except ValueError:
+            signame = f"SIG{signum}"
+        if signum == signal.SIGKILL:
+            return (
+                f"被信号 {signame} 杀死；这通常意味着进程被系统强制终止，"
+                "常见原因是 OOM 或容器内存限制"
+            )
+        return f"被信号 {signame} 杀死"
+    return f"异常退出，exitcode={exitcode}"
 
 
 def detect_static_by_sliding_2s(
@@ -449,6 +538,7 @@ def process_rosbag_parallel(
 
     num_workers = max(1, num_workers)
     print(f"[PARALLEL] ========== 启动 {num_workers} 进程并行读取 ==========")
+    _log_memory_snapshot("[PARALLEL] 启动前内存")
     _t_start = _time.time()
 
     prep = self._prescan_and_prepare_batches(bag_file, start_time, end_time, chunk_size)
@@ -518,66 +608,122 @@ def process_rosbag_parallel(
     pending_batches = {}
     next_batch_idx = 0
     failed_workers = set()
+    abnormal_workers = {}
+    last_memory_log_at = _time.time()
 
-    while len(completed_workers) < len(workers):
-        try:
-            result = result_queue.get(timeout=300)
-            if result is None:
-                continue
+    try:
+        while len(completed_workers) < len(workers):
+            try:
+                result = result_queue.get(timeout=5)
+                if result is None:
+                    continue
 
-            msg_type = result.get("type", "batch")
-            worker_id = result.get("worker_id")
+                msg_type = result.get("type", "batch")
+                worker_id = result.get("worker_id")
 
-            if msg_type == "done":
-                if worker_id not in completed_workers:
-                    completed_workers.add(worker_id)
-                    print(f"[PARALLEL] Worker {worker_id} 完成")
-                continue
+                if msg_type == "done":
+                    if worker_id not in completed_workers:
+                        completed_workers.add(worker_id)
+                        print(f"[PARALLEL] Worker {worker_id} 完成")
+                    continue
 
-            if msg_type == "error":
-                if worker_id not in failed_workers:
-                    failed_workers.add(worker_id)
-                    completed_workers.add(worker_id)
-                    print(f"[PARALLEL] Worker {worker_id} 错误: {result['error']}")
-                continue
+                if msg_type == "error":
+                    if worker_id not in failed_workers:
+                        failed_workers.add(worker_id)
+                        completed_workers.add(worker_id)
+                        print(f"[PARALLEL] Worker {worker_id} 错误: {result['error']}")
+                    continue
 
-            batch_idx = result["batch_idx"]
-            pending_batches[batch_idx] = result["data"]
-            print(
-                f"[PARALLEL] 收到 Batch {batch_idx + 1} "
-                f"(待输出 {len(pending_batches)} 个, 已完成worker {len(completed_workers)}/{len(workers)})"
-            )
-
-            while next_batch_idx in pending_batches:
-                batch_data = pending_batches.pop(next_batch_idx)
-                batches_yielded += 1
+                batch_idx = result["batch_idx"]
+                pending_batches[batch_idx] = result["data"]
                 print(
-                    f"[PARALLEL] 输出 Batch {next_batch_idx + 1} "
-                    f"(已产出 {batches_yielded}/{num_batches})"
+                    f"[PARALLEL] 收到 Batch {batch_idx + 1} "
+                    f"(待输出 {len(pending_batches)} 个, 已完成worker {len(completed_workers)}/{len(workers)})"
                 )
-                yield batch_data
-                next_batch_idx += 1
-        except Exception as e:
-            print(f"[PARALLEL] 接收 Batch 出错: {e}")
-            import traceback
-            traceback.print_exc()
-            break
 
-    for w_idx, p in enumerate(workers):
-        p.join(timeout=10)
-        if p.is_alive():
-            print(f"[PARALLEL] Worker {w_idx} 超时，强制终止")
-            p.terminate()
+                while next_batch_idx in pending_batches:
+                    batch_data = pending_batches.pop(next_batch_idx)
+                    batches_yielded += 1
+                    print(
+                        f"[PARALLEL] 输出 Batch {next_batch_idx + 1} "
+                        f"(已产出 {batches_yielded}/{num_batches})"
+                    )
+                    yield batch_data
+                    next_batch_idx += 1
 
-    while not result_queue.empty():
+                if _time.time() - last_memory_log_at >= 30:
+                    _log_memory_snapshot("[PARALLEL] 运行中内存")
+                    last_memory_log_at = _time.time()
+            except Exception:
+                dead_workers = []
+                for w_idx, p in enumerate(workers):
+                    if w_idx in completed_workers:
+                        continue
+                    if p.exitcode is not None:
+                        completed_workers.add(w_idx)
+                        if p.exitcode != 0:
+                            abnormal_workers[w_idx] = p.exitcode
+                            dead_workers.append((w_idx, p.exitcode))
+                if dead_workers:
+                    for w_idx, exitcode in dead_workers:
+                        print(
+                            f"[PARALLEL][ERROR] Worker {w_idx} 提前退出: "
+                            f"{_describe_exitcode(exitcode)}"
+                        )
+                    _log_memory_snapshot("[PARALLEL][ERROR] 异常退出时内存")
+                    raise RuntimeError(
+                        "并行 ROSbag 读取 worker 异常退出: "
+                        + "; ".join(
+                            f"worker {w_idx}: {_describe_exitcode(exitcode)}"
+                            for w_idx, exitcode in dead_workers
+                        )
+                    )
+
+                if _time.time() - last_memory_log_at >= 30:
+                    _log_memory_snapshot("[PARALLEL] 运行中内存")
+                    last_memory_log_at = _time.time()
+    finally:
+        for w_idx, p in enumerate(workers):
+            p.join(timeout=2)
+            if p.is_alive():
+                print(f"[PARALLEL] Worker {w_idx} 未正常结束，发送 terminate")
+                p.terminate()
+                p.join(timeout=5)
+            if p.is_alive():
+                print(f"[PARALLEL] Worker {w_idx} terminate 后仍存活，发送 kill")
+                p.kill()
+                p.join(timeout=5)
+            if p.exitcode not in (0, None):
+                abnormal_workers[w_idx] = p.exitcode
+                print(
+                    f"[PARALLEL][ERROR] Worker {w_idx} 退出状态异常: "
+                    f"{_describe_exitcode(p.exitcode)}"
+                )
+
+        while not result_queue.empty():
+            try:
+                result_queue.get_nowait()
+            except Exception:
+                break
+
         try:
-            result_queue.get_nowait()
+            result_queue.close()
         except Exception:
-            break
+            pass
+        try:
+            result_queue.cancel_join_thread()
+        except Exception:
+            pass
 
-    _t_total = _time.time() - _t_start
-    _t_read = _time.time() - _t_read_start
-    print("[PARALLEL] ========== 并行读取完成 ==========")
-    print(f"[PARALLEL] 总耗时: {_t_total:.2f}s, 读取阶段: {_t_read:.2f}s")
-    print(f"[PARALLEL] 产出 {batches_yielded} 个 batch")
-    gc.collect()
+        _t_total = _time.time() - _t_start
+        _t_read = _time.time() - _t_read_start
+        print("[PARALLEL] ========== 并行读取完成 ==========")
+        print(f"[PARALLEL] 总耗时: {_t_total:.2f}s, 读取阶段: {_t_read:.2f}s")
+        print(f"[PARALLEL] 产出 {batches_yielded} 个 batch")
+        _log_memory_snapshot("[PARALLEL] 结束时内存")
+        if abnormal_workers:
+            print(
+                "[PARALLEL][ERROR] 检测到异常 worker 退出，"
+                "如出现 SIGKILL，请优先检查 OOM / 容器 memory limit / /dev/shm"
+            )
+        gc.collect()
