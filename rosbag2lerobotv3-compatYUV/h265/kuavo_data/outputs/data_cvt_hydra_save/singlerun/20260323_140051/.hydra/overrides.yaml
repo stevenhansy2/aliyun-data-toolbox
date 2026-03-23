@@ -1,0 +1,4 @@
+- rosbag.rosbag_dir=/home/leju_kuavo/hsy-temp/file/data/rosbag/no_color_raw
+- rosbag.lerobot_dir=/tmp/rosbag2lerobotv3_compat_v21probe2
+- dataset.eef_type=qiangnao
+- rosbag.num_used=1

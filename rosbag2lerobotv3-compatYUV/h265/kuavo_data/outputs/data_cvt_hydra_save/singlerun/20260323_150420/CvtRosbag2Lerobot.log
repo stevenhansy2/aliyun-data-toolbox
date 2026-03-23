@@ -1,0 +1,1 @@
+[2026-03-23 15:04:47,637][root][ERROR] - Video encoding failed for observation.images.wrist_cam_r: No images found in /tmp/rosbag2lerobotv3_pythonref_probe/no_color_raw_run3_20260320_151712/images/observation.images.wrist_cam_r/episode-000000.
