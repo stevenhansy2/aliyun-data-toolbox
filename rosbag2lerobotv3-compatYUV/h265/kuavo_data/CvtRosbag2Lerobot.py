@@ -417,7 +417,8 @@ def _build_full_stream_videos(bag_file: Path, output_root: str | Path) -> dict[s
             cam_topics[cam_key] = topic
             reverse_cam_topics[topic] = cam_key
 
-    work_dir = Path(output_root) / '_source_videos' / bag_file.stem
+    temp_root = Path(tempfile.gettempdir()) / "rosbag2lerobotv3_source_videos"
+    work_dir = temp_root / bag_file.stem
     work_dir.mkdir(parents=True, exist_ok=True)
 
     print(f'[INFO] Building full-stream source videos for {bag_file.name}', flush=True)

@@ -274,11 +274,11 @@ def patched_save_episode_video(self, video_key: str, episode_index: int, temp_pa
                 dst_path.parent.mkdir(parents=True, exist_ok=True)
                 if src_path != dst_path.resolve():
                     shutil.copy2(src_path, dst_path)
-                per_key[src_key] = (chunk_idx, file_idx, str(dst_path))
+                per_key[src_key] = (chunk_idx, file_idx, str(dst_path), str(src_path))
                 if episode_index == 0 or source_count == 0:
                     self.meta.update_video_info(video_key)
                     write_info(self.meta.info, self.meta.root)
-            chunk_idx, file_idx, _ = per_key[src_key]
+            chunk_idx, file_idx, _, _ = per_key[src_key]
             timestamps = [float(ref["timestamp"]) for ref in refs]
             from_ts = min(timestamps) if timestamps else 0.0
             to_ts = (max(timestamps) + 1.0 / self.fps) if timestamps else 0.0
@@ -382,14 +382,36 @@ def patched_save_episode(self, episode_data: dict | None = None, parallel_encodi
     if not episode_data:
         self.clear_episode_buffer(delete_images=len(self.meta.image_keys) > 0)
 
+
+_original_finalize = getattr(LeRobotDataset, "finalize", None)
+
+
+def patched_finalize(self, *args, **kwargs):
+    try:
+        if _original_finalize is not None:
+            return _original_finalize(self, *args, **kwargs)
+        return None
+    finally:
+        registry = getattr(self, "_direct_video_registry", None)
+        if registry:
+            for per_key in registry.values():
+                for _, _, _, src_path in per_key.values():
+                    src_dir = Path(src_path).resolve().parent
+                    if "rosbag2lerobotv3_source_videos" in str(src_dir):
+                        shutil.rmtree(src_dir, ignore_errors=True)
+
 LeRobotDataset.add_frame = patched_add_frame
 LeRobotDataset.save_episode = patched_save_episode
 LeRobotDataset._save_episode_video = patched_save_episode_video
 LeRobotDataset._encode_temporary_episode_video = patched_encode_temporary_episode_video
+if _original_finalize is not None:
+    LeRobotDataset.finalize = patched_finalize
 lerobot_datasets_lerobot_dataset.LeRobotDataset.add_frame = patched_add_frame
 lerobot_datasets_lerobot_dataset.LeRobotDataset.save_episode = patched_save_episode
 lerobot_datasets_lerobot_dataset.LeRobotDataset._save_episode_video = patched_save_episode_video
 lerobot_datasets_lerobot_dataset.LeRobotDataset._encode_temporary_episode_video = patched_encode_temporary_episode_video
+if _original_finalize is not None:
+    lerobot_datasets_lerobot_dataset.LeRobotDataset.finalize = patched_finalize
 sys.modules["lerobot.datasets.lerobot_dataset"] = lerobot_datasets_lerobot_dataset
 
 
