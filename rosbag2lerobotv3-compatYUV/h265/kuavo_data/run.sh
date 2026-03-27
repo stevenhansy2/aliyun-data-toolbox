@@ -14,6 +14,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LEROBOT_SRC="$PROJECT_ROOT/lerobot/src"
 LOCAL_CONDA_PYTHON_DEFAULT="/tmp/r2l050_yuv_env/bin/python"
 LOCAL_ROS_PYTHONPATH_DEFAULT="/opt/ros/noetic/lib/python3/dist-packages"
+TIMEOUT_BIN="$(command -v timeout || true)"
 
 # 本地直跑时，确保能导入仓库内 lerobot 源码，并尽量补齐 ROS Python 路径
 if [[ -d "$LEROBOT_SRC" ]]; then
@@ -35,6 +36,7 @@ ACCESS_KEY_ID="${ACCESS_KEY_ID:-LTAI5tEs3xD65oJHSAF8S7fJ}"
 ACCESS_KEY_SECRET="${ACCESS_KEY_SECRET:-gpcIcxhVUT0ybGqlvNoNrNkb13suIs}"
 ENDPOINT="${ENDPOINT:-oss-cn-hangzhou.aliyuncs.com}"
 MASTER_TIMEOUT_SEC="${MASTER_TIMEOUT_SEC:-36000}"
+RESUME_CONVERSION="${RESUME_CONVERSION:-true}"
 
 ### 转换参数：当前仓库仅保留 _s 逻辑
 if [[ -z "${PYTHON:-}" && -x "$LOCAL_CONDA_PYTHON_DEFAULT" ]]; then
@@ -46,6 +48,7 @@ MASTER_SCRIPT="$SCRIPT_DIR/CvtRosbag2Lerobot.py"
 echo "使用流式版本脚本 (CvtRosbag2Lerobot.py)"
 echo "Python 解释器: $PYTHON"
 echo "PYTHONPATH: ${PYTHONPATH:-<empty>}"
+echo "断点续转: $RESUME_CONVERSION"
 
 detect_eef_type_by_topic() {
   local bag_path="$1"
@@ -75,6 +78,17 @@ elif "/gripper/state" in topics or "/gripper/command" in topics:
 else:
     print("")
 PY
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" "$timeout_sec" "$@"
+  else
+    "$@"
+  fi
 }
 
 # Step 1: 生成 ossutil 配置（仅上传时需要）
@@ -209,12 +223,18 @@ for DATA_DIR in "${DATA_DIRS[@]}"; do
 
   echo "✅ 使用配置: $CONFIG_FILE (eef_type=$EEF_TYPE)"
 
+  DATASET_OUTPUT_DIR="$OUTPUT_DIR_DATA"
+  if [[ "$DATA_DIR" != "$INPUT_DIR" ]]; then
+    DATASET_OUTPUT_DIR="$OUTPUT_DIR_DATA/$data_id"
+    mkdir -p "$DATASET_OUTPUT_DIR"
+  fi
+
   ARGS=(
     "$PYTHON" "$MASTER_SCRIPT"
     "--config-path" "configs/"
     "--config-name" "$CONFIG_FILE"
     "rosbag.rosbag_dir=$DATA_DIR"
-    "rosbag.lerobot_dir=$OUTPUT_DIR_DATA"
+    "rosbag.lerobot_dir=$DATASET_OUTPUT_DIR"
   )
   ARGS+=("${CONFIG_OVERRIDES[@]}")
 
@@ -224,15 +244,36 @@ for DATA_DIR in "${DATA_DIRS[@]}"; do
   fi
 
   echo "📝 执行命令: ${ARGS[*]}"
+  echo "📁 单数据集输出目录: $DATASET_OUTPUT_DIR"
+  echo "🧭 断点续转状态文件: $DATASET_OUTPUT_DIR/_resume_state.json"
 
   START_TIME=$(date +%s)
-  if (cd "$PROJECT_ROOT" && timeout "$MASTER_TIMEOUT_SEC" "${ARGS[@]}"); then
+  set +e
+  (
+    cd "$PROJECT_ROOT"
+    export RESUME_CONVERSION
+    run_with_timeout "$MASTER_TIMEOUT_SEC" "${ARGS[@]}"
+  )
+  status=$?
+  set -e
+
+  if [[ $status -eq 0 ]]; then
     END_TIME=$(date +%s)
     DURATION=$((END_TIME - START_TIME))
     echo "✅ data_id=$data_id 转换成功完成！"
     echo "⏱️  转换耗时: ${DURATION} 秒"
   else
-    echo "❌ ROSbag 转换失败 (data_id: $data_id)"
+    if [[ -n "$TIMEOUT_BIN" && $status -eq 124 ]]; then
+      echo "❌ ROSbag 转换超时 (data_id: $data_id, timeout=${MASTER_TIMEOUT_SEC}s)"
+    elif [[ $status -gt 128 ]]; then
+      signal=$((status - 128))
+      echo "❌ ROSbag 转换被信号终止 (data_id: $data_id, signal=$signal)"
+      if [[ $signal -eq 11 ]]; then
+        echo "   检测到 SIGSEGV（段错误），这不是超时。"
+      fi
+    else
+      echo "❌ ROSbag 转换失败 (data_id: $data_id, exit_code=$status)"
+    fi
     exit 1
   fi
 

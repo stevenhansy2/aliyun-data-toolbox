@@ -1,0 +1,3 @@
+- rosbag.rosbag_dir=/home/leju_kuavo/hsy-temp/file/data/rosbag/2026-03-26-time-sync
+- rosbag.lerobot_dir=/home/leju_kuavo/hsy-temp/file/data/lerobot/2026-03-27-time-sync/export/lerobot
+- dataset.eef_type=leju_claw

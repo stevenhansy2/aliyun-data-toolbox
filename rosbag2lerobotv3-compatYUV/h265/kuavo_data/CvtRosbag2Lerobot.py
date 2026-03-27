@@ -16,6 +16,7 @@
         rosbag.chunk_size=100
 """
 import custom_patches  # Ensure custom patches are applied, DON'T REMOVE THIS LINE!
+import json
 import os
 import gc
 import shutil
@@ -56,6 +57,7 @@ class SimpleLogger:
 
 
 DEFAULT_JOINT_NAMES_LIST = kuavo.DEFAULT_JOINT_NAMES_LIST
+RESUME_STATE_FILENAME = "_resume_state.json"
 
 # helpers for metadata-driven cropping and merging
 from converter.data.metadata_merge import get_time_range_from_metadata
@@ -114,6 +116,34 @@ def calculate_total_frames(chunk_dirs):
             except Exception as e:
                 log_print.warning(f"读取 parquet 文件失败 {pf}: {e}")
     return total
+
+
+def _resume_state_path(root: str | Path) -> Path:
+    return Path(root) / RESUME_STATE_FILENAME
+
+
+def _load_resume_state(root: str | Path) -> dict:
+    state_path = _resume_state_path(root)
+    if not state_path.is_file():
+        return {"completed_bags": []}
+    try:
+        with open(state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        log_print.warning(f"Failed to load resume state {state_path}: {e}")
+        return {"completed_bags": []}
+    completed = state.get("completed_bags", []) if isinstance(state, dict) else []
+    if not isinstance(completed, list):
+        completed = []
+    return {"completed_bags": completed}
+
+
+def _save_resume_state(root: str | Path, completed_bags: list[str]) -> None:
+    state_path = _resume_state_path(root)
+    tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump({"completed_bags": completed_bags}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, state_path)
 
 
 log_print = SimpleLogger()
@@ -211,6 +241,37 @@ def create_empty_dataset_chunked(
         image_writer_processes=dataset_config.image_writer_processes,
         image_writer_threads=dataset_config.image_writer_threads,
         video_backend=dataset_config.video_backend,
+        root=root,
+    )
+
+
+def _create_or_load_dataset_chunked(
+    repo_id: str,
+    robot_type: str,
+    mode: Literal["video", "image"] = "video",
+    *,
+    has_velocity: bool = False,
+    has_effort: bool = False,
+    dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
+    root: str,
+    resume: bool = False,
+) -> LeRobotDataset:
+    root_path = Path(root)
+    info_path = root_path / "meta" / "info.json"
+    if resume and info_path.is_file():
+        log_print.info(f"Resume mode: loading existing dataset at {root_path}")
+        return LeRobotDataset(repo_id=repo_id, root=root_path)
+
+    if root_path.exists():
+        shutil.rmtree(root_path)
+
+    return create_empty_dataset_chunked(
+        repo_id=repo_id,
+        robot_type=robot_type,
+        mode=mode,
+        has_velocity=has_velocity,
+        has_effort=has_effort,
+        dataset_config=dataset_config,
         root=root,
     )
 
@@ -434,6 +495,7 @@ def populate_dataset_chunked(
     root: str = None,  # 输出根目录
     repo_id: str = None,  # 数据集 ID
     metadata_json_path: str = None,  # metadata.json 文件路径
+    resume: bool = False,
 ) -> LeRobotDataset:
     """
     使用分块流式处理填充数据集
@@ -454,6 +516,7 @@ def populate_dataset_chunked(
         episodes = range(len(bag_files))
     
     failed_bags = []
+    completed_bags = set(_load_resume_state(root).get("completed_bags", [])) if resume else set()
     log_print.info(f"Total episodes to process: {len(episodes)}")
     bag_reader = kuavo.KuavoRosbagReader()
     
@@ -788,6 +851,10 @@ def populate_dataset_chunked(
                 gc.collect()
             
             log_print.info(f"Episode {ep_idx} completed: {frame_count[0]} frames")
+            if resume:
+                completed_bags.add(str(ep_path.resolve()))
+                _save_resume_state(root, sorted(completed_bags))
+                log_print.info(f"Resume checkpoint saved for bag: {ep_path.name}")
             
         except Exception as e:
             log_print.error(f"Error processing {ep_path}: {e}")
@@ -867,6 +934,7 @@ def port_kuavo_rosbag_chunked(
     metadata: dict | None = None,
     metadata_json_path: str = None,
     bag_files_override: list[Path] | None = None,
+    resume: bool = False,
 ):
     """
     分块流式转换rosbag到LeRobot格式
@@ -877,9 +945,6 @@ def port_kuavo_rosbag_chunked(
         task: 任务描述
         chunk_size: 每个chunk的帧数（默认100）
     """
-    if (LEROBOT_HOME / repo_id).exists():
-        shutil.rmtree(LEROBOT_HOME / repo_id)
-
     if bag_files_override is not None:
         bag_files = bag_files_override
     else:
@@ -894,7 +959,29 @@ def port_kuavo_rosbag_chunked(
             select_idx = np.random.choice(num_available_bags, n, replace=False)
             bag_files = [bag_files[i] for i in select_idx]
     
-    dataset = create_empty_dataset_chunked(
+    state = _load_resume_state(root) if resume else {"completed_bags": []}
+    completed_bags = {str(Path(p).resolve()) for p in state.get("completed_bags", [])}
+    if resume and not completed_bags and Path(root, "meta", "info.json").is_file():
+        try:
+            existing_dataset = LeRobotDataset(repo_id=repo_id, root=root)
+            inferred_count = min(existing_dataset.meta.total_episodes, len(bag_files))
+            if inferred_count > 0:
+                completed_bags = {str(Path(bf).resolve()) for bf in bag_files[:inferred_count]}
+                _save_resume_state(root, sorted(completed_bags))
+                log_print.warning(
+                    f"Resume state missing; inferred {inferred_count} completed bags from existing dataset episodes."
+                )
+        except Exception as e:
+            log_print.warning(f"Failed inferring completed bags from existing dataset: {e}")
+
+    original_bag_count = len(bag_files)
+    if resume and completed_bags:
+        bag_files = [bf for bf in bag_files if str(Path(bf).resolve()) not in completed_bags]
+        log_print.info(
+            f"Resume mode: skipping {original_bag_count - len(bag_files)} completed bags, remaining {len(bag_files)}"
+        )
+
+    dataset = _create_or_load_dataset_chunked(
         repo_id,
         robot_type="kuavo4pro",
         mode=mode,
@@ -902,19 +989,35 @@ def port_kuavo_rosbag_chunked(
         has_velocity=False,
         dataset_config=dataset_config,
         root=root,
+        resume=resume,
     )
+
+    if len(bag_files) == 0:
+        log_print.info("No remaining bags to process.")
+        return dataset
     
-    dataset = populate_dataset_chunked(
-        dataset,
-        bag_files,
-        task=task,
-        episodes=episodes,
-        chunk_size=chunk_size,
-        metadata=metadata,
-        root=root,
-        repo_id=repo_id,
-        metadata_json_path=metadata_json_path,
-    )
+    try:
+        dataset = populate_dataset_chunked(
+            dataset,
+            bag_files,
+            task=task,
+            episodes=episodes,
+            chunk_size=chunk_size,
+            metadata=metadata,
+            root=root,
+            repo_id=repo_id,
+            metadata_json_path=metadata_json_path,
+            resume=resume,
+        )
+    finally:
+        try:
+            dataset.meta._flush_metadata_buffer()
+        except Exception:
+            pass
+        try:
+            dataset.consolidate()
+        except Exception:
+            pass
     # 如果提供了 metadata 字典，则生成完整的 metadata（包含 label_info.action_config）
     try:
         if metadata:
@@ -1023,6 +1126,7 @@ def main(cfg: DictConfig):
     os.makedirs(lerobot_base_dir, exist_ok=True)
 
     chunk_size = cfg.rosbag.get("chunk_size", 800)
+    resume_enabled = os.environ.get("RESUME_CONVERSION", "true").strip().lower() not in ("0", "false", "no")
     # 尝试从配置/命令行参数读取 metadata.json 路径并加载
     metadata = None
     meta_path = None
@@ -1096,38 +1200,35 @@ def main(cfg: DictConfig):
         select_idx = np.random.choice(num_available, n, replace=False)
         all_bag_files = [all_bag_files[i] for i in select_idx]
 
+    dataset_name = _sanitize_dataset_name(task_name)
+    repo_id = f"lerobot/{dataset_name}"
+    lerobot_dir = lerobot_base_dir
+
+    if (not resume_enabled) and os.path.exists(lerobot_dir):
+        shutil.rmtree(lerobot_dir)
+    os.makedirs(lerobot_dir, exist_ok=True)
+
     log_print.info(f"=== Chunked Streaming Rosbag Converter ===")
     log_print.info(f"Rosbag dir: {raw_dir}")
-    log_print.info(f"Output base dir: {lerobot_base_dir}")
+    log_print.info(f"Output dir: {lerobot_dir}")
+    log_print.info(f"Dataset name: {dataset_name}")
     log_print.info(f"Total bags to process: {len(all_bag_files)}")
     log_print.info(f"Chunk size: {chunk_size}")
+    log_print.info(f"Resume conversion: {resume_enabled}")
 
-    # 逐个 bag 处理，每个 bag 一个独立子目录
-    for bag_idx, bag_path in enumerate(all_bag_files):
-        bag_stem = os.path.splitext(os.path.basename(str(bag_path)))[0]
-        dataset_name = _sanitize_dataset_name(bag_stem)
-        repo_id = f'lerobot/{dataset_name}'
-        lerobot_dir = os.path.join(lerobot_base_dir, dataset_name)
-
-        # 清理该 bag 的输出目录（不影响其他 bag）
-        if os.path.exists(lerobot_dir):
-            shutil.rmtree(lerobot_dir)
-
-        log_print.info(f"({bag_idx+1}/{len(all_bag_files)}) Processing: {bag_path}")
-        log_print.info(f"Output dir: {lerobot_dir}")
-
-        port_kuavo_rosbag_chunked(
-            raw_dir=raw_dir,
-            repo_id=repo_id,
-            task=kuavo.TASK_DESCRIPTION,
-            mode="video",
-            root=lerobot_dir,
-            n=None,
-            chunk_size=chunk_size,
-            metadata=metadata,
-            metadata_json_path=meta_path if metadata else None,
-            bag_files_override=[bag_path],
-        )
+    port_kuavo_rosbag_chunked(
+        raw_dir=raw_dir,
+        repo_id=repo_id,
+        task=kuavo.TASK_DESCRIPTION,
+        mode="video",
+        root=lerobot_dir,
+        n=None,
+        chunk_size=chunk_size,
+        metadata=metadata,
+        metadata_json_path=meta_path if metadata else None,
+        bag_files_override=all_bag_files,
+        resume=resume_enabled,
+    )
     
     end_time = time.time()
     elapsed = end_time - start_time
@@ -1141,8 +1242,3 @@ if __name__ == "__main__":
     sys.stdout.flush()
     sys.stderr.flush()
     os._exit(0)
-
-
-
-
-
