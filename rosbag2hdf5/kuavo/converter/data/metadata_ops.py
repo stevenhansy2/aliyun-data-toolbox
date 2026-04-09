@@ -20,6 +20,18 @@ def _to_float_seconds(value):
         raise ValueError(f"Invalid duration value: {value}") from exc
 
 
+def _infer_eef_type_from_bag_path(bag_path):
+    if not bag_path:
+        return None
+
+    bag_name = os.path.basename(str(bag_path)).lower()
+    if "dex_hand" in bag_name:
+        return "dex_hand"
+    if "leju_claw" in bag_name:
+        return "leju_claw"
+    return None
+
+
 def calculate_action_frames(
     rosbag_actual_start_time,  # 实际数据开始时间
     rosbag_actual_end_time,  # 实际数据结束时间
@@ -210,6 +222,7 @@ def merge_metadata_and_moment(
     bag_time_info=None,
     main_time_line_timestamps=None,
     output_dir=None,
+    bag_path=None,
 ):
     """
     合并 metadata 和 moment 数据，并添加 bag 时间信息和计算帧数
@@ -233,9 +246,9 @@ def merge_metadata_and_moment(
     # 验证 metadata.json 关键字段是否存在且非空
     if is_new_format:
         required_metadata_fields = {
-            "primaryScene": "一级场景名称",
-            "tertiaryScene": "三级场景名称",
-            "initSceneText": "子场景中文描述",
+            "primarySceneCode": "一级场景编码",
+            "secondarySceneCode": "二级场景编码",
+            "englishInitSceneText": "子场景英文描述",
             "deviceSn": "设备序列号",
         }
     else:
@@ -306,41 +319,28 @@ def merge_metadata_and_moment(
     # 转换 metadata 为统一格式
     converted_metadata = {}
 
-    if is_new_format:
-        converted_metadata["scene_name"] = raw_metadata.get("primaryScene")
-        converted_metadata["sub_scene_name"] = raw_metadata.get("tertiaryScene")
-    else:
-        converted_metadata["scene_name"] = raw_metadata.get("sceneCode")
-        converted_metadata["sub_scene_name"] = raw_metadata.get("subSceneCode")
+    # scene_name / sub_scene_name / init_scene_text 按新字段规则映射
+    converted_metadata["scene_name"] = raw_metadata.get("primarySceneCode")
+    converted_metadata["sub_scene_name"] = raw_metadata.get("secondarySceneCode")
 
-    # init_scene_text 对应场景中文描述
-    converted_metadata["init_scene_text"] = raw_metadata.get("initSceneText")
-
-    # english_init_scene_text 缺失时回退到中文描述，避免展示字段阻断主流程
     english_init_scene_text = raw_metadata.get("englishInitSceneText")
     if not english_init_scene_text or (
         isinstance(english_init_scene_text, str) and english_init_scene_text.strip() == ""
     ):
-        english_init_scene_text = raw_metadata.get("initSceneText")
+        english_init_scene_text = raw_metadata.get("englishInitSceneText") or raw_metadata.get("initSceneText")
         log_print(
             "[WARN] metadata.json 缺失 englishInitSceneText，回退使用 initSceneText"
         )
+
+    converted_metadata["init_scene_text"] = raw_metadata.get("initSceneText")
     converted_metadata["english_init_scene_text"] = english_init_scene_text
 
-    # task_name 优先 task_group_name 其次 task_name
-    if task_group_name:
-        converted_metadata["task_name"] = task_group_name
-    else:
-        converted_metadata["task_name"] = task_name
+    # task_name 直接取原始 metadata 中的 taskName
+    converted_metadata["task_name"] = task_name
 
-    # english_task_name 优先 task_group_code 其次 task_code
-    if task_group_code:
-        english_task_name = task_group_code
-    else:
-        english_task_name = task_code
+    # english_task_name 直接取原始 metadata 中的 taskCode
+    english_task_name = task_code
 
-    if isinstance(english_task_name, str) and "_" in english_task_name:
-        english_task_name = english_task_name.replace("_", " ")
     converted_metadata["english_task_name"] = english_task_name
 
     # 默认值字段
@@ -353,6 +353,13 @@ def merge_metadata_and_moment(
 
     # sn_name 默认值
     converted_metadata["sn_name"] = "乐聚机器人"
+
+    # 优先从 bag 文件名识别末端执行器类型，回退到 metadata 字段
+    converted_metadata["eefType"] = (
+        _infer_eef_type_from_bag_path(bag_path)
+        or raw_metadata.get("eefType")
+        or raw_metadata.get("eef_type")
+    )
 
     # 新增：验证转换后的关键字段不能为空
     final_required_fields = {

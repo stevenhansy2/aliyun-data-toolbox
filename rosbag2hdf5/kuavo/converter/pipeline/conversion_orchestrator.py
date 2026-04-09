@@ -230,6 +230,7 @@ def generate_dataset_file(
             bag_time_info=bag_time_info,
             main_time_line_timestamps=main_time_line_timestamps,
             output_dir=output_dir,
+            bag_path=ep_path,
         )
 
         temp_uuid_path = os.path.join(output_dir, uuid)
