@@ -347,12 +347,10 @@ def populate_dataset_chunked(
             # 收集当前episode的所有帧
             frames_buffer = []
             frame_count = [0]
-            chunk_frame_ranges = []  # 记录每个 chunk 的帧范围 [(start, end), ...]
-            current_chunk_frames = 0  # 当前 chunk 已处理的帧数
             total_frames = 0  # 初始化总帧数（用于 metadata 处理）
 
             def on_frame(aligned_frame: dict, frame_idx: int):
-                nonlocal current_chunk_frames, total_frames
+                nonlocal total_frames
                 """处理单帧对齐数据"""
                 # 如果使用 explicit frame indices 进行裁剪（双重保险）
                 if start_frame is not None:
@@ -518,78 +516,17 @@ def populate_dataset_chunked(
 
             
             def on_chunk_done():
-                """每个chunk处理完后的回调：保存并释放内存"""
-                nonlocal root, repo_id, metadata_json_path
+                """每个chunk处理完后的回调：追加到当前 episode buffer 并释放内存"""
                 if len(frames_buffer) == 0:
                     return
 
-                # 将所有缓存的帧添加到dataset
+                # 将当前 chunk 的帧追加到同一个 episode 中。
+                # 注意：这里不能调用 save_episode()，否则单个 bag 会被切成多个 episode。
                 for frame in frames_buffer:
                     frame["task"] = task
                     dataset.add_frame(frame)
 
-                # 保存当前chunk
-                dataset.save_episode()
-                dataset.hf_dataset = dataset.create_hf_dataset()
-
-                # 记录当前 chunk 的帧范围
-                chunk_start_frame = frame_count[0] - len(frames_buffer)
-                chunk_end_frame = frame_count[0] - 1
-                chunk_frame_ranges.append((chunk_start_frame, chunk_end_frame))
-                chunk_idx = len(chunk_frame_ranges) - 1
-
-                # 如果有 metadata，保存该 batch 的 metadata
-                if metadata and total_frames > 0:
-                    try:
-                        # 提取该 chunk 范围内的 marks
-                        chunk_marks = extract_actions_for_chunk(
-                            metadata=metadata,
-                            chunk_start_frame=chunk_start_frame,
-                            chunk_end_frame=chunk_end_frame,
-                            total_frames=total_frames
-                        )
-
-                        if chunk_marks:
-                            # 创建 batch 目录
-                            batch_dir = Path(root) / f"batch_{chunk_idx:04d}"
-                            batch_dir.mkdir(parents=True, exist_ok=True)
-
-                            # 保存该 chunk 的 metadata
-                            save_chunk_metadata(
-                                output_path=batch_dir / "metadata.json",
-                                metadata=metadata,
-                                chunk_marks=chunk_marks,
-                                total_frames=len(frames_buffer),  # 当前 chunk 的帧数
-                                episode_uuid=repo_id.split("/")[-1],
-                                raw_config=None,
-                                metadata_json_path=metadata_json_path  # 传递原始 metadata.json 路径
-                            )
-
-                            # 复制 data 和 meta 目录到 batch 目录
-                            chunk_data_dir = Path(root) / "data"
-                            if chunk_data_dir.exists():
-                                import shutil
-                                batch_data_dir = batch_dir / "data"
-                                if batch_data_dir.exists():
-                                    shutil.rmtree(batch_data_dir)
-                                shutil.copytree(chunk_data_dir, batch_data_dir)
-
-                            batch_meta_dir = Path(root) / "meta"
-                            if batch_meta_dir.exists():
-                                batch_meta_out_dir = batch_dir / "meta"
-                                if batch_meta_out_dir.exists():
-                                    shutil.rmtree(batch_meta_out_dir)
-                                shutil.copytree(batch_meta_dir, batch_meta_out_dir)
-
-                            log_print.info(f"✓ 保存 batch {chunk_idx} metadata: {len(chunk_marks)} 个动作, 帧范围 {chunk_start_frame}-{chunk_end_frame}")
-                        else:
-                            log_print.debug(f"Batch {chunk_idx}: 无相关的 marks")
-                    except Exception as e:
-                        log_print.warning(f"保存 batch metadata 失败: {e}")
-                        import traceback
-                        traceback.print_exc()
-
-                # 清空buffer并释放内存
+                # 清空当前 chunk 的临时缓存并释放内存
                 frames_buffer.clear()
                 gc.collect()
 
@@ -604,14 +541,18 @@ def populate_dataset_chunked(
                 crop_range=crop_range  # 传递裁剪范围，如果为 None 则不裁剪
             )
              
-            # 处理剩余的帧
+            # 处理最后一个未满 chunk 的剩余帧
             if len(frames_buffer) > 0:
                 for frame in frames_buffer:
-                    dataset.add_frame(frame, task=task)
-                dataset.save_episode()
-                dataset.hf_dataset = dataset.create_hf_dataset()
+                    frame["task"] = task
+                    dataset.add_frame(frame)
                 frames_buffer.clear()
                 gc.collect()
+
+            # 整个 bag 只保存一次 episode
+            if dataset.episode_buffer is not None and dataset.episode_buffer["size"] > 0:
+                dataset.save_episode()
+                dataset.hf_dataset = dataset.create_hf_dataset()
             
             log_print.info(f"Episode {ep_idx} completed: {frame_count[0]} frames")
             
@@ -630,39 +571,6 @@ def populate_dataset_chunked(
             for bag in failed_bags:
                 f.write(bag + "\n")
         log_print.error(f"{len(failed_bags)} failed bags written to error.txt")
-
-    # 如果生成了 batch 目录，执行批次合并
-    if chunk_frame_ranges and len(chunk_frame_ranges) > 1:
-        log_print.info(f"\n{'='*60}")
-        log_print.info(f"检测到 {len(chunk_frame_ranges)} 个 batch，开始合并...")
-        log_print.info(f"{'='*60}")
-
-        try:
-            from converter.pipeline.batch_merger import merge_all_batches
-
-            # 合并所有 batch
-            merge_all_batches(
-                input_dir=str(root),
-                output_dir=str(root)
-            )
-
-            log_print.info(f"\n✓ 批次合并完成！")
-
-        except Exception as e:
-            log_print.error(f"批次合并失败: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # 清理残留的 batch 目录
-    base_path = Path(root)
-    if base_path.exists():
-        for d in base_path.iterdir():
-            if d.is_dir() and d.name.startswith("batch_"):
-                try:
-                    shutil.rmtree(d)
-                    log_print.info("已删除批次文件夹: %s", d)
-                except Exception as e:
-                    log_print.warning("删除批次文件夹失败: %s, 错误: %s", d, e)
 
     return dataset
 
@@ -951,7 +859,6 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
     log_print.info("Starting Kuavo rosbag to LeRobot conversion...")
     main()
-
 
 
 
