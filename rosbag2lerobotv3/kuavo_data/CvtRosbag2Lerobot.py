@@ -337,7 +337,12 @@ def populate_dataset_chunked(
             # 如果没有 explicit frame indices，使用 fractional positions（来自 marks）
             if start_frame is None:
                 frac_range = get_time_range_from_metadata(metadata)
-                if frac_range is not None:
+                if (
+                    frac_range is not None
+                    and len(frac_range) == 2
+                    and frac_range[0] is not None
+                    and frac_range[1] is not None
+                ):
                     crop_range = frac_range  # (min_start_position, max_end_position)
                     log_print.info(
                         f"Using fractional crop range from marks: {crop_range[0]:.3f}-{crop_range[1]:.3f}"
@@ -951,7 +956,6 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
     log_print.info("Starting Kuavo rosbag to LeRobot conversion...")
     main()
-
 
 
 

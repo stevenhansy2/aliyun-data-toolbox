@@ -1,0 +1,4 @@
+test_bag/
+*.tar
+*/outputs/
+__pycache__/

@@ -1,0 +1,22 @@
+{
+  "images": {
+    "rosbag2lerobotv3": [
+      {
+        "version": "dev-v1",
+        "local_image": "rosbag2lerobotv3:dev-v1",
+        "remote_image": "cr.lejugym.com/a03/rosbag2lerobotv3:dev-v1",
+        "project_dir": "/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/rosbag2lerobotv3",
+        "tar_path": "/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/rosbag2lerobotv3/rosbag2lerobotv3.tar",
+        "built_at": "2026-06-28 13:32:57"
+      },
+      {
+        "version": "dev-v2",
+        "local_image": "rosbag2lerobotv3:dev-v2",
+        "remote_image": "cr.lejugym.com/a03/rosbag2lerobotv3:dev-v2",
+        "project_dir": "/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/rosbag2lerobotv3",
+        "tar_path": "/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/rosbag2lerobotv3/rosbag2lerobotv3.tar",
+        "built_at": "2026-06-28 13:42:32"
+      }
+    ]
+  }
+}
