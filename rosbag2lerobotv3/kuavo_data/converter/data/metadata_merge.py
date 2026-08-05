@@ -510,10 +510,10 @@ def get_time_range_from_metadata(metadata: dict) -> Optional[tuple]:
     """从 metadata 字典中提取时间范围（start/end positions）。
 
     如果是新格式（包含 marks 数组），会返回 min(startPosition) 和 max(endPosition)。
-    否则返回 None, None.
+    否则返回 None。
     """
     if not isinstance(metadata, dict):
-        return None, None
+        return None
     marks = metadata.get("marks")
     if isinstance(marks, list) and marks:
         start_positions = []
@@ -528,7 +528,7 @@ def get_time_range_from_metadata(metadata: dict) -> Optional[tuple]:
                 pass
         if start_positions and end_positions:
             return min(start_positions), max(end_positions)
-    return None, None
+    return None
 
 
 def merge_batch_metadata(batch_dirs: List[str], output_dir: str, total_frames: int) -> dict:

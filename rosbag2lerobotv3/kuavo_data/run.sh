@@ -21,15 +21,17 @@ fi
 # 输入/上传相关环境变量（对齐 rosbag2hdf5/run.sh）
 OUTPUT_DIR="${OUTPUT_DIR:-/outputs}"
 # OUTPUT_DIR="${OUTPUT_DIR:-/home/zhangyutao/Documents/Work/Code/Contest/test_bags/outputs}"
+# OUTPUT_DIR="${OUTPUT_DIR:-/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/test_bag/outputs}"
 # OUTPUT_DIR="${OUTPUT_DIR:-/app/data/outputs}"
 INPUT_DIR="${INPUT_DIR:-/inputs}"
 # INPUT_DIR="${INPUT_DIR:-/home/zhangyutao/Documents/Work/Code/Contest/test_bags/inputs}"
+# INPUT_DIR="${INPUT_DIR:-/home/zhangyutao/Documents/Work/Code/Contest/aliyun-data-toolbox/test_bag/inputs}"
 # INPUT_DIR="${INPUT_DIR:-/app/data/inputs}"
-OSS_BUCKET="${OSS_BUCKET:-}"
-FOLDER_ID="${FOLDER_ID:-}"
-ACCESS_KEY_ID="${ACCESS_KEY_ID:-LTAI5tEs3xD65oJHSAF8S7fJ}"
-ACCESS_KEY_SECRET="${ACCESS_KEY_SECRET:-gpcIcxhVUT0ybGqlvNoNrNkb13suIs}"
-ENDPOINT="${ENDPOINT:-oss-cn-hangzhou.aliyuncs.com}"
+# OSS_BUCKET="${OSS_BUCKET:-}"
+# FOLDER_ID="${FOLDER_ID:-}"
+# ACCESS_KEY_ID="${ACCESS_KEY_ID:-LTAI5tEs3xD65oJHSAF8S7fJ}"
+# ACCESS_KEY_SECRET="${ACCESS_KEY_SECRET:-gpcIcxhVUT0ybGqlvNoNrNkb13suIs}"
+# ENDPOINT="${ENDPOINT:-oss-cn-hangzhou.aliyuncs.com}"
 MASTER_TIMEOUT_SEC="${MASTER_TIMEOUT_SEC:-36000}"
 
 ### 转换参数：当前仓库仅保留 _s 逻辑
@@ -40,24 +42,24 @@ PYTHON="${PYTHON:-python}"
 MASTER_SCRIPT="$SCRIPT_DIR/CvtRosbag2Lerobot.py"
 echo "使用流式版本脚本 (CvtRosbag2Lerobot.py)"
 
-# Step 1: 生成 ossutil 配置（仅上传时需要）
-if [[ -n "$OSS_BUCKET" || -n "$FOLDER_ID" ]]; then
-  if [[ -z "$ACCESS_KEY_ID" || -z "$ACCESS_KEY_SECRET" || -z "$ENDPOINT" ]]; then
-    echo "❌ 缺少 OSS 配置：需要 ACCESS_KEY_ID / ACCESS_KEY_SECRET / ENDPOINT"
-    exit 1
-  fi
+# # Step 1: 生成 ossutil 配置（仅上传时需要）
+# if [[ -n "$OSS_BUCKET" || -n "$FOLDER_ID" ]]; then
+#   if [[ -z "$ACCESS_KEY_ID" || -z "$ACCESS_KEY_SECRET" || -z "$ENDPOINT" ]]; then
+#     echo "❌ 缺少 OSS 配置：需要 ACCESS_KEY_ID / ACCESS_KEY_SECRET / ENDPOINT"
+#     exit 1
+#   fi
 
-  echo "========== Step 1: 生成 ossutil 配置文件 =========="
-  cat > ~/.ossutilconfig <<EOC
-[default]
-accessKeyId=${ACCESS_KEY_ID}
-accessKeySecret=${ACCESS_KEY_SECRET}
-region=cn-hangzhou
-endpoint=${ENDPOINT}
-EOC
-else
-  echo "========== Step 1: 跳过 ossutil 配置（未配置 OSS_BUCKET/FOLDER_ID） =========="
-fi
+#   echo "========== Step 1: 生成 ossutil 配置文件 =========="
+#   cat > ~/.ossutilconfig <<EOC
+# [default]
+# accessKeyId=${ACCESS_KEY_ID}
+# accessKeySecret=${ACCESS_KEY_SECRET}
+# region=cn-hangzhou
+# endpoint=${ENDPOINT}
+# EOC
+# else
+#   echo "========== Step 1: 跳过 ossutil 配置（未配置 OSS_BUCKET/FOLDER_ID） =========="
+# fi
 
  # Step 2: 执行 ROSbag 到 LeRobot 转换
 if [[ ! -d "$INPUT_DIR" ]]; then
@@ -200,23 +202,23 @@ OUTPUT_FILES=$(find "$OUTPUT_DIR_DATA" -type f | wc -l)
 echo "📊 总输出文件大小: $OUTPUT_SIZE"
 echo "📊 总输出文件数量: $OUTPUT_FILES 个"
 
-# Step 3: 上传到 OSS（可选）
-if [[ -n "$OSS_BUCKET" || -n "$FOLDER_ID" ]]; then
-  if [[ -z "$OSS_BUCKET" || -z "$FOLDER_ID" ]]; then
-    echo "❌ 上传需要同时配置 OSS_BUCKET 和 FOLDER_ID"
-    exit 1
-  fi
+# # Step 3: 上传到 OSS（可选）
+# if [[ -n "$OSS_BUCKET" || -n "$FOLDER_ID" ]]; then
+#   if [[ -z "$OSS_BUCKET" || -z "$FOLDER_ID" ]]; then
+#     echo "❌ 上传需要同时配置 OSS_BUCKET 和 FOLDER_ID"
+#     exit 1
+#   fi
 
-  echo "========== Step 3: 上传到 oss =========="
-  OSS_BUCKET_CLEAN="${OSS_BUCKET%/}"
-  OSS_TARGET_ROOT="${OSS_BUCKET_CLEAN}/${FOLDER_ID}"
-  OSS_TARGET_DIR="${OSS_TARGET_ROOT}/"
-  echo "✅ 上传目录: $OUTPUT_DIR_DATA"
-  echo "OSS 目标目录: $OSS_TARGET_DIR"
-  ossutil cp -r -u "$OUTPUT_DIR_DATA" "$OSS_TARGET_DIR"
-else
-  echo "========== Step 3: 跳过上传（未配置 OSS_BUCKET/FOLDER_ID） =========="
-fi
+#   echo "========== Step 3: 上传到 oss =========="
+#   OSS_BUCKET_CLEAN="${OSS_BUCKET%/}"
+#   OSS_TARGET_ROOT="${OSS_BUCKET_CLEAN}/${FOLDER_ID}"
+#   OSS_TARGET_DIR="${OSS_TARGET_ROOT}/"
+#   echo "✅ 上传目录: $OUTPUT_DIR_DATA"
+#   echo "OSS 目标目录: $OSS_TARGET_DIR"
+#   ossutil cp -r -u "$OUTPUT_DIR_DATA" "$OSS_TARGET_DIR"
+# else
+#   echo "========== Step 3: 跳过上传（未配置 OSS_BUCKET/FOLDER_ID） =========="
+# fi
 
 END=$(date +%s)
 DURATION_TIME=$((END - START))
